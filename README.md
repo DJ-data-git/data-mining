@@ -12,4 +12,4 @@
 ```bash
 pip install -r requirements.txt
 
-python new.py
+python news.py
