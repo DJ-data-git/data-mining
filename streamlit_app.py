@@ -4,6 +4,7 @@ import boto3
 import re
 from collections import Counter
 from itertools import combinations
+from sklearn.feature_extraction.text import TfidfVectorizer
 
 # ---------------------------
 # 페이지 설정
@@ -411,6 +412,99 @@ def make_auto_insight(topic_sentiment_df, network_df):
     return insights
 
 
+def extract_tfidf_keywords(df, top_n=20):
+    text_series = make_text_series(df).fillna("").astype(str)
+
+    if len(text_series) == 0 or text_series.str.strip().eq("").all():
+        return pd.DataFrame(columns=["keyword", "score"])
+
+    vectorizer = TfidfVectorizer(
+        max_features=1000,
+        token_pattern=r"(?u)\b[가-힣A-Za-z0-9]{2,}\b"
+    )
+
+    try:
+        tfidf_matrix = vectorizer.fit_transform(text_series)
+    except ValueError:
+        return pd.DataFrame(columns=["keyword", "score"])
+
+    scores = tfidf_matrix.sum(axis=0).A1
+    words = vectorizer.get_feature_names_out()
+
+    tfidf_df = pd.DataFrame({
+        "keyword": words,
+        "score": scores
+    })
+
+    return tfidf_df.sort_values("score", ascending=False).head(top_n)
+
+
+def make_media_frame_analysis(df, media_col="media_domain"):
+    frame_keywords = {
+        "성장/혁신": ["성장", "혁신", "출시", "확대", "협력", "투자", "강화"],
+        "보안/리스크": ["해킹", "침해", "유출", "장애", "공격", "위험", "취약점"],
+        "산업/경쟁": ["시장", "경쟁", "점유율", "HBM", "반도체", "공급망", "수출"],
+        "정책/규제": ["정부", "규제", "정책", "법안", "지원", "제도"],
+        "인프라/클라우드": ["클라우드", "데이터센터", "AWS", "Azure", "서버", "인프라"]
+    }
+
+    rows = []
+
+    top_media = (
+        df[media_col]
+        .fillna("unknown")
+        .value_counts()
+        .head(15)
+        .index
+        .tolist()
+    )
+
+    for media in top_media:
+        media_df = df[df[media_col] == media]
+        row = {
+            "media_domain": media,
+            "total_articles": len(media_df)
+        }
+
+        text_series = make_text_series(media_df)
+
+        for frame, keywords in frame_keywords.items():
+            count = 0
+
+            for keyword in keywords:
+                count += text_series.str.contains(
+                    keyword,
+                    case=False,
+                    regex=False
+                ).sum()
+
+            row[frame] = int(count)
+
+        rows.append(row)
+
+    return pd.DataFrame(rows)
+
+
+def make_event_annotations(df, date_col):
+    rows = []
+
+    date_counts = (
+        df[date_col]
+        .value_counts()
+        .sort_values(ascending=False)
+        .head(5)
+    )
+
+    for date, count in date_counts.items():
+        rows.append({
+            "date": date,
+            "event": f"기사 급증 ({count}건)",
+            "analysis": "해당 날짜에 주요 기업 발표, 보안 사고, 기술 행사, 정책 발표 등이 있었을 가능성이 있음"
+        })
+
+    return pd.DataFrame(rows)
+
+
 def show_article_table(df, date_col="analysis_date"):
     show_cols = [
         col for col in [
@@ -531,7 +625,6 @@ with col4:
 
 st.markdown("### 오늘의 주요 IT 키워드 TOP 10")
 st.bar_chart(top_keywords.set_index("keyword"))
-
 st.dataframe(top_keywords, use_container_width=True)
 
 st.markdown("### 오늘의 메가 트렌드 해석")
@@ -549,7 +642,30 @@ st.info(
 st.markdown("---")
 
 # ---------------------------
-# 1. 일별 주요 IT 키워드
+# 1. TF-IDF 핵심 키워드 분석
+# ---------------------------
+
+st.subheader("TF-IDF 기반 핵심 키워드 분석")
+
+st.caption(
+    "단순 등장 빈도가 아니라 특정 기사 집합에서 상대적으로 중요하게 등장한 키워드를 추출합니다."
+)
+
+tfidf_df = extract_tfidf_keywords(latest_df, top_n=20)
+
+st.dataframe(tfidf_df, use_container_width=True)
+
+if not tfidf_df.empty:
+    st.bar_chart(tfidf_df.set_index("keyword")["score"])
+
+st.info(
+    "TF-IDF는 단순 빈도 분석보다 특정 시점에서 상대적으로 중요한 키워드를 더 잘 탐지할 수 있습니다."
+)
+
+st.markdown("---")
+
+# ---------------------------
+# 2. 일별 주요 IT 키워드
 # ---------------------------
 
 st.subheader("일별 주요 IT 키워드")
@@ -582,14 +698,12 @@ st.write(f"'{selected_daily_keyword}' 일별 등장 추이")
 st.dataframe(selected_daily_keyword_df, use_container_width=True)
 
 if not selected_daily_keyword_df.empty:
-    st.line_chart(
-        selected_daily_keyword_df.set_index("date")["count"]
-    )
+    st.line_chart(selected_daily_keyword_df.set_index("date")["count"])
 
 st.markdown("---")
 
 # ---------------------------
-# 2. 키워드 클릭 → 관련 기사
+# 3. 키워드 클릭 → 관련 기사
 # ---------------------------
 
 st.subheader("키워드 클릭해서 관련 기사 보기")
@@ -618,7 +732,7 @@ if selected_keyword:
 st.markdown("---")
 
 # ---------------------------
-# 3. 최신일 주요 이슈 자동 요약
+# 4. 최신일 주요 이슈 자동 요약
 # ---------------------------
 
 st.subheader(f"{latest_date} 주요 이슈 자동 요약")
@@ -642,7 +756,7 @@ st.bar_chart(issue_df.set_index("issue")["article_count"])
 st.markdown("---")
 
 # ---------------------------
-# 4. 키워드 동시출현 네트워크 분석
+# 5. 키워드 동시출현 네트워크 분석
 # ---------------------------
 
 st.subheader("키워드 동시출현 네트워크 분석")
@@ -660,7 +774,7 @@ if not network_df.empty:
 st.markdown("---")
 
 # ---------------------------
-# 5. 주제별 기사 수 및 상세 기사
+# 6. 주제별 기사 수 및 상세 기사
 # ---------------------------
 
 st.subheader("주제별 기사 수")
@@ -694,7 +808,7 @@ show_article_table(selected_topic_df, date_col)
 st.markdown("---")
 
 # ---------------------------
-# 6. 주제별 감성 지수 교차 분석
+# 7. 주제별 감성 지수 교차 분석
 # ---------------------------
 
 st.subheader("주제별 감성 지수 교차 분석")
@@ -719,7 +833,7 @@ st.info(
 st.markdown("---")
 
 # ---------------------------
-# 7. 주제별 시계열 트렌드
+# 8. 주제별 시계열 트렌드
 # ---------------------------
 
 st.subheader("주제별 시계열 트렌드 분석")
@@ -757,7 +871,28 @@ if not selected_topic_daily_df.empty:
 st.markdown("---")
 
 # ---------------------------
-# 8. 언론사별 보도 주제 비중
+# 9. 이벤트 주석 기반 시계열 분석
+# ---------------------------
+
+st.subheader("이벤트 주석 기반 시계열 분석")
+
+event_df = make_event_annotations(df, date_col)
+
+st.caption(
+    "기사 수가 급증한 날짜를 자동 탐지하여 주요 이벤트 가능성을 표시합니다."
+)
+
+st.dataframe(event_df, use_container_width=True)
+
+st.info(
+    "시계열 분석에서 기사 수가 급증한 날짜는 기업 실적 발표, 기술 행사, "
+    "보안 사고, 정책 발표 등 실제 이벤트와 연결해 해석할 수 있습니다."
+)
+
+st.markdown("---")
+
+# ---------------------------
+# 10. 언론사별 보도 주제 비중
 # ---------------------------
 
 st.subheader("언론사별 보도 주제 비중")
@@ -789,7 +924,42 @@ st.dataframe(media_topic_df, use_container_width=True)
 st.markdown("---")
 
 # ---------------------------
-# 9. 감성/리스크 분석
+# 11. 언론사별 보도 프레임 분석
+# ---------------------------
+
+st.subheader("언론사별 보도 프레임 분석")
+
+frame_df = make_media_frame_analysis(df)
+
+st.caption(
+    "언론사별로 성장/혁신, 보안/리스크, 산업/경쟁, 정책/규제, 인프라/클라우드 프레임이 어떻게 나타나는지 분석합니다."
+)
+
+st.dataframe(frame_df, use_container_width=True)
+
+selected_frame = st.selectbox(
+    "프레임 선택",
+    [
+        "성장/혁신",
+        "보안/리스크",
+        "산업/경쟁",
+        "정책/규제",
+        "인프라/클라우드"
+    ]
+)
+
+if selected_frame in frame_df.columns:
+    st.bar_chart(frame_df.set_index("media_domain")[selected_frame])
+
+st.info(
+    "예를 들어 보안 전문 매체는 '보안/리스크' 프레임 비중이 높고, "
+    "IT 플랫폼 매체는 '성장/혁신' 또는 '인프라/클라우드' 프레임 비중이 높게 나타날 수 있습니다."
+)
+
+st.markdown("---")
+
+# ---------------------------
+# 12. 감성/리스크 분석
 # ---------------------------
 
 st.subheader("간단 감성/리스크 분석")
@@ -808,7 +978,7 @@ with st.expander("부정/리스크 기사 보기"):
 st.markdown("---")
 
 # ---------------------------
-# 10. 날짜별 기사 수
+# 13. 날짜별 기사 수
 # ---------------------------
 
 st.subheader("날짜별 기사 수")
@@ -822,7 +992,7 @@ st.line_chart(date_count.set_index("date"))
 st.markdown("---")
 
 # ---------------------------
-# 11. 언론사별 기사 수
+# 14. 언론사별 기사 수
 # ---------------------------
 
 st.subheader("언론사별 기사 수")
@@ -836,7 +1006,7 @@ st.bar_chart(media_count.set_index("media_domain"))
 st.markdown("---")
 
 # ---------------------------
-# 12. 전체 기사 검색
+# 15. 전체 기사 검색
 # ---------------------------
 
 st.subheader("전체 기사 검색")
