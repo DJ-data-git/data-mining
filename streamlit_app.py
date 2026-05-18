@@ -5,10 +5,128 @@ import re
 from collections import Counter
 from itertools import combinations
 
-st.set_page_config(page_title="IT 뉴스 분석 대시보드", layout="wide")
+# ---------------------------
+# 페이지 설정
+# ---------------------------
 
-st.title("IT 뉴스 분석 대시보드")
-st.caption("뉴스 텍스트마이닝 기반: 주요 이슈 · 키워드 네트워크 · 언론사별 보도 주제 · 감성/리스크 분석")
+st.set_page_config(
+    page_title="IT News Intelligence Dashboard",
+    layout="wide"
+)
+
+# ---------------------------
+# 디자인 CSS
+# ---------------------------
+
+st.markdown("""
+<style>
+.stApp {
+    background: linear-gradient(135deg, #0f172a 0%, #111827 45%, #020617 100%);
+    color: #e5e7eb;
+}
+
+.block-container {
+    padding-top: 2rem;
+    padding-bottom: 3rem;
+}
+
+h1 {
+    color: #38bdf8;
+    font-weight: 800;
+    letter-spacing: -0.04em;
+}
+
+h2, h3 {
+    color: #e5e7eb;
+    font-weight: 700;
+}
+
+[data-testid="stCaptionContainer"] {
+    color: #94a3b8;
+}
+
+[data-testid="stMetric"] {
+    background: rgba(15, 23, 42, 0.9);
+    border: 1px solid rgba(56, 189, 248, 0.25);
+    padding: 18px;
+    border-radius: 18px;
+    box-shadow: 0 0 24px rgba(56, 189, 248, 0.08);
+}
+
+[data-testid="stMetricLabel"] {
+    color: #94a3b8;
+}
+
+[data-testid="stMetricValue"] {
+    color: #38bdf8;
+    font-weight: 800;
+}
+
+.stAlert {
+    background: rgba(14, 165, 233, 0.12);
+    border: 1px solid rgba(56, 189, 248, 0.35);
+    border-radius: 14px;
+    color: #e0f2fe;
+}
+
+.stButton > button {
+    background: linear-gradient(135deg, #0284c7, #2563eb);
+    color: white;
+    border: 0;
+    border-radius: 999px;
+    padding: 0.5rem 1rem;
+    font-weight: 700;
+    box-shadow: 0 0 18px rgba(37, 99, 235, 0.25);
+}
+
+.stButton > button:hover {
+    background: linear-gradient(135deg, #38bdf8, #2563eb);
+    color: white;
+    border: 0;
+}
+
+[data-testid="stDataFrame"] {
+    border-radius: 16px;
+    overflow: hidden;
+    border: 1px solid rgba(148, 163, 184, 0.2);
+}
+
+.stTextInput input {
+    background-color: #020617;
+    color: #e5e7eb;
+    border: 1px solid #334155;
+    border-radius: 12px;
+}
+
+.stSelectbox div {
+    color: #e5e7eb;
+}
+
+.streamlit-expanderHeader {
+    background: rgba(15, 23, 42, 0.7);
+    border-radius: 12px;
+    color: #e5e7eb;
+}
+
+hr {
+    border: none;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, #38bdf8, transparent);
+    margin: 2rem 0;
+}
+</style>
+""", unsafe_allow_html=True)
+
+# ---------------------------
+# 제목
+# ---------------------------
+
+st.title("IT News Intelligence Dashboard")
+st.caption("실시간 IT 뉴스 기반 텍스트마이닝 · 키워드 네트워크 · 언론사별 보도 주제 분석")
+
+# ---------------------------
+# AWS / S3 설정
+# ---------------------------
 
 AWS_ACCESS_KEY_ID = st.secrets["AWS_ACCESS_KEY_ID"]
 AWS_SECRET_ACCESS_KEY = st.secrets["AWS_SECRET_ACCESS_KEY"]
@@ -25,7 +143,6 @@ s3 = boto3.client(
 PREFIX = "it_news/IT/processed/"
 START_DATE = "20260514"
 
-
 # ---------------------------
 # 기본 함수
 # ---------------------------
@@ -40,7 +157,11 @@ def list_all_csv_files(bucket, prefix):
     token = None
 
     while True:
-        params = {"Bucket": bucket, "Prefix": prefix}
+        params = {
+            "Bucket": bucket,
+            "Prefix": prefix
+        }
+
         if token:
             params["ContinuationToken"] = token
 
@@ -52,20 +173,35 @@ def list_all_csv_files(bucket, prefix):
         else:
             break
 
-    return [file for file in all_files if file["Key"].endswith(".csv")]
+    return [
+        file for file in all_files
+        if file["Key"].endswith(".csv")
+    ]
 
 
 def load_csv_from_s3(key):
-    obj = s3.get_object(Bucket=BUCKET_NAME, Key=key)
+    obj = s3.get_object(
+        Bucket=BUCKET_NAME,
+        Key=key
+    )
+
     temp_df = pd.read_csv(obj["Body"])
     temp_df["loaded_file"] = key
+
     return temp_df
 
 
 def find_date_column(df):
-    for col in ["pubDate_dt", "pubDate_ymd", "pubDate", "date", "published_date"]:
+    for col in [
+        "pubDate_dt",
+        "pubDate_ymd",
+        "pubDate",
+        "date",
+        "published_date"
+    ]:
         if col in df.columns:
             return col
+
     return None
 
 
@@ -74,7 +210,11 @@ def normalize_date_column(df, raw_date_col):
         df["analysis_date"] = "unknown"
         return df, "analysis_date"
 
-    df[raw_date_col] = pd.to_datetime(df[raw_date_col], errors="coerce")
+    df[raw_date_col] = pd.to_datetime(
+        df[raw_date_col],
+        errors="coerce"
+    )
+
     df["analysis_date"] = df[raw_date_col].dt.strftime("%Y-%m-%d")
     df["analysis_date"] = df["analysis_date"].fillna("unknown")
 
@@ -119,7 +259,10 @@ def count_keywords(df, keywords):
             "count": int(count)
         })
 
-    return pd.DataFrame(result).sort_values("count", ascending=False)
+    return pd.DataFrame(result).sort_values(
+        "count",
+        ascending=False
+    )
 
 
 def extract_simple_words(df, top_n=20):
@@ -163,10 +306,9 @@ def filter_by_keywords(df, keywords):
 
 def make_keyword_network(df, keywords):
     text_series = make_text_series(df)
-
     rows = []
 
-    for idx, text in text_series.items():
+    for _, text in text_series.items():
         appeared = []
 
         for keyword in keywords:
@@ -177,7 +319,9 @@ def make_keyword_network(df, keywords):
             rows.append((a, b))
 
     if not rows:
-        return pd.DataFrame(columns=["keyword_a", "keyword_b", "co_count"])
+        return pd.DataFrame(
+            columns=["keyword_a", "keyword_b", "co_count"]
+        )
 
     network_df = (
         pd.DataFrame(rows, columns=["keyword_a", "keyword_b"])
@@ -201,7 +345,6 @@ def classify_sentiment(df):
     ]
 
     text_series = make_text_series(df)
-
     result = []
 
     for text in text_series:
@@ -233,10 +376,15 @@ def show_article_table(df, date_col="analysis_date"):
     ]
 
     if date_col in df.columns:
-        df = df.sort_values(by=date_col, ascending=False)
+        df = df.sort_values(
+            by=date_col,
+            ascending=False
+        )
 
-    st.dataframe(df[show_cols], use_container_width=True)
-
+    st.dataframe(
+        df[show_cols],
+        use_container_width=True
+    )
 
 # ---------------------------
 # 데이터 로딩
@@ -256,24 +404,40 @@ if not filtered_files:
     st.error("2026년 5월 14일 이후 CSV 파일을 찾지 못했습니다.")
     st.stop()
 
-filtered_files = sorted(filtered_files, key=lambda x: x["Key"])
+filtered_files = sorted(
+    filtered_files,
+    key=lambda x: x["Key"]
+)
 
-df_list = [load_csv_from_s3(file["Key"]) for file in filtered_files]
+df_list = [
+    load_csv_from_s3(file["Key"])
+    for file in filtered_files
+]
+
 df = pd.concat(df_list, ignore_index=True)
 
 raw_date_col = find_date_column(df)
 df, date_col = normalize_date_column(df, raw_date_col)
 
-dedup_cols = [col for col in ["originallink", "link", "title"] if col in df.columns]
+dedup_cols = [
+    col for col in ["originallink", "link", "title"]
+    if col in df.columns
+]
+
 if dedup_cols:
-    df = df.drop_duplicates(subset=dedup_cols, keep="last")
+    df = df.drop_duplicates(
+        subset=dedup_cols,
+        keep="last"
+    )
 
 latest_date = df[date_col].dropna().max()
 latest_df = df[df[date_col] == latest_date].copy()
 
 if "media_domain" not in df.columns:
-    df["media_domain"] = df.get("source", "unknown")
-
+    if "source" in df.columns:
+        df["media_domain"] = df["source"]
+    else:
+        df["media_domain"] = "unknown"
 
 # ---------------------------
 # 분석 기준
@@ -296,14 +460,17 @@ topic_map = {
     "플랫폼/빅테크": ["네이버", "카카오", "구글", "애플", "메타"]
 }
 
-
 # ---------------------------
 # 1. 상단 핵심 요약
 # ---------------------------
 
 st.subheader(f"{latest_date} 주요 IT 뉴스 요약")
 
-latest_keyword_df = count_keywords(latest_df, main_keywords)
+latest_keyword_df = count_keywords(
+    latest_df,
+    main_keywords
+)
+
 top_keywords = latest_keyword_df.head(10)
 
 col1, col2, col3, col4 = st.columns(4)
@@ -320,8 +487,12 @@ with col3:
 with col4:
     st.metric("수집 파일 수", len(filtered_files))
 
+st.markdown("---")
+
 st.markdown("### 최신일 주요 키워드 TOP 10")
-st.bar_chart(top_keywords.set_index("keyword"))
+st.bar_chart(
+    top_keywords.set_index("keyword")
+)
 
 st.markdown("### 최신일 주요 이슈 자동 요약")
 
@@ -329,25 +500,35 @@ issue_rows = []
 
 for topic, keywords in topic_map.items():
     topic_df = filter_by_keywords(latest_df, keywords)
+
     issue_rows.append({
         "issue": topic,
         "article_count": len(topic_df),
         "keywords": ", ".join(keywords)
     })
 
-issue_df = pd.DataFrame(issue_rows).sort_values("article_count", ascending=False)
+issue_df = pd.DataFrame(issue_rows).sort_values(
+    "article_count",
+    ascending=False
+)
 
-st.dataframe(issue_df, use_container_width=True)
-
+st.dataframe(
+    issue_df,
+    use_container_width=True
+)
 
 # ---------------------------
 # 2. 키워드 클릭 → 관련 기사 보기
 # ---------------------------
 
+st.markdown("---")
 st.subheader("키워드 클릭해서 관련 기사 보기")
 
 if "selected_keyword" not in st.session_state:
-    st.session_state["selected_keyword"] = top_keywords.iloc[0]["keyword"] if not top_keywords.empty else ""
+    if not top_keywords.empty:
+        st.session_state["selected_keyword"] = top_keywords.iloc[0]["keyword"]
+    else:
+        st.session_state["selected_keyword"] = ""
 
 button_cols = st.columns(5)
 
@@ -362,41 +543,64 @@ for idx, row in top_keywords.reset_index(drop=True).iterrows():
 selected_keyword = st.session_state["selected_keyword"]
 
 if selected_keyword:
-    keyword_articles = filter_by_keyword(df, selected_keyword)
+    keyword_articles = filter_by_keyword(
+        df,
+        selected_keyword
+    )
 
-    st.info(f"선택된 키워드: {selected_keyword} / 관련 기사 수: {len(keyword_articles)}건")
-    show_article_table(keyword_articles, date_col)
+    st.info(
+        f"선택된 키워드: {selected_keyword} / 관련 기사 수: {len(keyword_articles)}건"
+    )
 
+    show_article_table(
+        keyword_articles,
+        date_col
+    )
 
 # ---------------------------
 # 3. 키워드 네트워크 분석
 # ---------------------------
 
+st.markdown("---")
 st.subheader("키워드 동시출현 네트워크 분석")
 
-network_df = make_keyword_network(df, main_keywords)
+network_df = make_keyword_network(
+    df,
+    main_keywords
+)
 
 st.caption("같은 기사 안에 함께 등장한 키워드 조합을 계산한 결과입니다.")
-st.dataframe(network_df.head(30), use_container_width=True)
+st.dataframe(
+    network_df.head(30),
+    use_container_width=True
+)
 
 if not network_df.empty:
-    st.bar_chart(
-        network_df.head(15).assign(
-            pair=network_df.head(15)["keyword_a"] + " - " + network_df.head(15)["keyword_b"]
-        ).set_index("pair")["co_count"]
+    top_network = network_df.head(15).copy()
+    top_network["pair"] = (
+        top_network["keyword_a"]
+        + " - "
+        + top_network["keyword_b"]
     )
 
+    st.bar_chart(
+        top_network.set_index("pair")["co_count"]
+    )
 
 # ---------------------------
 # 4. 주제별 기사 수 및 상세 기사
 # ---------------------------
 
+st.markdown("---")
 st.subheader("주제별 기사 수")
 
 topic_result = []
 
 for topic, keywords in topic_map.items():
-    topic_df = filter_by_keywords(df, keywords)
+    topic_df = filter_by_keywords(
+        df,
+        keywords
+    )
 
     topic_result.append({
         "topic": topic,
@@ -404,10 +608,19 @@ for topic, keywords in topic_map.items():
         "keywords": ", ".join(keywords)
     })
 
-topic_df = pd.DataFrame(topic_result).sort_values("count", ascending=False)
+topic_df = pd.DataFrame(topic_result).sort_values(
+    "count",
+    ascending=False
+)
 
-st.dataframe(topic_df, use_container_width=True)
-st.bar_chart(topic_df.set_index("topic")["count"])
+st.dataframe(
+    topic_df,
+    use_container_width=True
+)
+
+st.bar_chart(
+    topic_df.set_index("topic")["count"]
+)
 
 selected_topic = st.selectbox(
     "주제별 기사 상세보기",
@@ -415,21 +628,37 @@ selected_topic = st.selectbox(
 )
 
 selected_topic_keywords = topic_map[selected_topic]
-selected_topic_df = filter_by_keywords(df, selected_topic_keywords)
 
-st.write(f"{selected_topic} 관련 기사 수: {len(selected_topic_df)}건")
-show_article_table(selected_topic_df, date_col)
+selected_topic_df = filter_by_keywords(
+    df,
+    selected_topic_keywords
+)
 
+st.write(
+    f"{selected_topic} 관련 기사 수: {len(selected_topic_df)}건"
+)
+
+show_article_table(
+    selected_topic_df,
+    date_col
+)
 
 # ---------------------------
 # 5. 언론사별 보도 주제 비중
 # ---------------------------
 
+st.markdown("---")
 st.subheader("언론사별 보도 주제 비중")
 
 media_topic_rows = []
 
-top_media = df["media_domain"].value_counts().head(15).index.tolist()
+top_media = (
+    df["media_domain"]
+    .value_counts()
+    .head(15)
+    .index
+    .tolist()
+)
 
 for media in top_media:
     media_df = df[df["media_domain"] == media]
@@ -441,8 +670,18 @@ for media in top_media:
     }
 
     for topic, keywords in topic_map.items():
-        count = len(filter_by_keywords(media_df, keywords))
-        ratio = round(count / total * 100, 1) if total else 0
+        count = len(
+            filter_by_keywords(
+                media_df,
+                keywords
+            )
+        )
+
+        ratio = round(
+            count / total * 100,
+            1
+        ) if total else 0
+
         row[topic] = ratio
 
     media_topic_rows.append(row)
@@ -450,13 +689,16 @@ for media in top_media:
 media_topic_df = pd.DataFrame(media_topic_rows)
 
 st.caption("각 언론사의 전체 기사 중 주제별 기사 비중입니다. 단위: %")
-st.dataframe(media_topic_df, use_container_width=True)
-
+st.dataframe(
+    media_topic_df,
+    use_container_width=True
+)
 
 # ---------------------------
 # 6. 감성/리스크 분석
 # ---------------------------
 
+st.markdown("---")
 st.subheader("간단 감성/리스크 분석")
 
 df["sentiment_group"] = classify_sentiment(df)
@@ -467,21 +709,33 @@ sentiment_count = (
     .reset_index()
 )
 
-sentiment_count.columns = ["sentiment", "count"]
+sentiment_count.columns = [
+    "sentiment",
+    "count"
+]
 
-st.dataframe(sentiment_count, use_container_width=True)
-st.bar_chart(sentiment_count.set_index("sentiment"))
+st.dataframe(
+    sentiment_count,
+    use_container_width=True
+)
+
+st.bar_chart(
+    sentiment_count.set_index("sentiment")
+)
 
 risk_df = df[df["sentiment_group"] == "부정/리스크"]
 
 with st.expander("부정/리스크 기사 보기"):
-    show_article_table(risk_df, date_col)
-
+    show_article_table(
+        risk_df,
+        date_col
+    )
 
 # ---------------------------
 # 7. 날짜별 기사 수
 # ---------------------------
 
+st.markdown("---")
 st.subheader("날짜별 기사 수")
 
 date_count = (
@@ -491,16 +745,25 @@ date_count = (
     .reset_index()
 )
 
-date_count.columns = ["date", "count"]
+date_count.columns = [
+    "date",
+    "count"
+]
 
-st.dataframe(date_count, use_container_width=True)
-st.line_chart(date_count.set_index("date"))
+st.dataframe(
+    date_count,
+    use_container_width=True
+)
 
+st.line_chart(
+    date_count.set_index("date")
+)
 
 # ---------------------------
 # 8. 언론사별 기사 수
 # ---------------------------
 
+st.markdown("---")
 st.subheader("언론사별 기사 수")
 
 media_count = (
@@ -510,32 +773,55 @@ media_count = (
     .reset_index()
 )
 
-media_count.columns = ["media_domain", "count"]
+media_count.columns = [
+    "media_domain",
+    "count"
+]
 
-st.dataframe(media_count, use_container_width=True)
-st.bar_chart(media_count.set_index("media_domain"))
+st.dataframe(
+    media_count,
+    use_container_width=True
+)
 
+st.bar_chart(
+    media_count.set_index("media_domain")
+)
 
 # ---------------------------
 # 9. 전체 기사 검색
 # ---------------------------
 
+st.markdown("---")
 st.subheader("전체 기사 검색")
 
 search_text = st.text_input("검색어를 입력하세요")
 
 if search_text:
-    search_df = filter_by_keyword(df, search_text)
-    st.write(f"검색 결과: {len(search_df)}건")
-    show_article_table(search_df, date_col)
+    search_df = filter_by_keyword(
+        df,
+        search_text
+    )
 
+    st.write(
+        f"검색 결과: {len(search_df)}건"
+    )
+
+    show_article_table(
+        search_df,
+        date_col
+    )
 
 # ---------------------------
 # 원본 데이터
 # ---------------------------
 
+st.markdown("---")
+
 with st.expander("원본 데이터 보기"):
-    st.dataframe(df, use_container_width=True)
+    st.dataframe(
+        df,
+        use_container_width=True
+    )
 
 with st.expander("불러온 파일 목록"):
     for file in filtered_files:
