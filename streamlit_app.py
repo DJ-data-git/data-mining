@@ -6,6 +6,11 @@ from collections import Counter
 from itertools import combinations
 from sklearn.feature_extraction.text import TfidfVectorizer
 
+import networkx as nx
+from pyvis.network import Network
+import streamlit.components.v1 as components
+import tempfile
+
 # ---------------------------
 # 페이지 설정
 # ---------------------------
@@ -241,24 +246,6 @@ def count_keywords(df, keywords):
     return pd.DataFrame(result).sort_values("count", ascending=False)
 
 
-def extract_simple_words(df, top_n=20):
-    text = " ".join(make_text_series(df).tolist())
-    words = re.findall(r"[가-힣A-Za-z0-9]{2,}", text)
-
-    stopwords = {
-        "기자", "뉴스", "오늘", "이번", "대한", "관련", "통해", "위해",
-        "있는", "했다", "한다", "지난", "오는", "올해", "기업", "산업",
-        "서비스", "시장", "기술", "제공", "발표", "추진", "구축", "사용",
-        "것으로", "이라고", "에서", "으로", "하고", "등을", "등의",
-        "위한", "밝혔다", "naver", "google"
-    }
-
-    words = [word for word in words if word.lower() not in stopwords]
-    counter = Counter(words)
-
-    return pd.DataFrame(counter.most_common(top_n), columns=["keyword", "count"])
-
-
 def make_daily_top_keywords(df, keywords, date_col, top_n=5):
     rows = []
 
@@ -300,6 +287,87 @@ def make_keyword_network(df, keywords):
         .reset_index(name="co_count")
         .sort_values("co_count", ascending=False)
     )
+
+
+def build_network_graph(network_df, top_n=25):
+    top_df = network_df.head(top_n)
+
+    G = nx.Graph()
+
+    for _, row in top_df.iterrows():
+        source = row["keyword_a"]
+        target = row["keyword_b"]
+        weight = int(row["co_count"])
+
+        G.add_node(source)
+        G.add_node(target)
+
+        G.add_edge(
+            source,
+            target,
+            value=weight,
+            title=f"동시출현: {weight}"
+        )
+
+    net = Network(
+        height="720px",
+        width="100%",
+        bgcolor="#0f172a",
+        font_color="white"
+    )
+
+    net.from_nx(G)
+
+    degree_dict = dict(G.degree())
+
+    for node in net.nodes:
+        node_id = node["id"]
+        node["size"] = 18 + degree_dict.get(node_id, 1) * 5
+        node["color"] = "#38bdf8"
+        node["borderWidth"] = 2
+
+    for edge in net.edges:
+        edge["color"] = "#64748b"
+        edge["smooth"] = True
+
+    net.set_options("""
+    var options = {
+      "nodes": {
+        "font": {
+          "size": 18,
+          "color": "white"
+        }
+      },
+      "edges": {
+        "font": {
+          "size": 12
+        },
+        "scaling": {
+          "min": 1,
+          "max": 8
+        }
+      },
+      "physics": {
+        "barnesHut": {
+          "gravitationalConstant": -25000,
+          "centralGravity": 0.3,
+          "springLength": 130,
+          "springConstant": 0.04,
+          "damping": 0.09
+        },
+        "minVelocity": 0.75
+      }
+    }
+    """)
+
+    temp_file = tempfile.NamedTemporaryFile(
+        delete=False,
+        suffix=".html"
+    )
+
+    net.save_graph(temp_file.name)
+
+    return temp_file.name
 
 
 def classify_sentiment(df):
@@ -770,6 +838,38 @@ if not network_df.empty:
     top_network["pair"] = top_network["keyword_a"] + " - " + top_network["keyword_b"]
 
     st.bar_chart(top_network.set_index("pair")["co_count"])
+
+# ---------------------------
+# 5-1. 네트워크 그래프 시각화
+# ---------------------------
+
+st.subheader("키워드 네트워크 그래프 시각화")
+
+st.caption(
+    "동시에 등장한 키워드 간 연결 구조를 네트워크 형태로 시각화합니다."
+)
+
+if not network_df.empty:
+    html_path = build_network_graph(
+        network_df,
+        top_n=25
+    )
+
+    with open(html_path, "r", encoding="utf-8") as f:
+        html_content = f.read()
+
+    components.html(
+        html_content,
+        height=760,
+        scrolling=True
+    )
+else:
+    st.warning("네트워크 그래프를 생성할 수 있는 동시출현 데이터가 없습니다.")
+
+st.info(
+    "노드(Node)는 키워드, 연결선(Edge)은 같은 기사 안에서 함께 등장한 관계를 의미합니다. "
+    "연결이 많을수록 최근 IT 뉴스에서 강하게 결합된 이슈라고 해석할 수 있습니다."
+)
 
 st.markdown("---")
 
