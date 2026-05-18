@@ -1,10 +1,7 @@
 import streamlit as st
 import pandas as pd
 import boto3
-
-# ---------------------------
-# 페이지 설정
-# ---------------------------
+import re
 
 st.set_page_config(
     page_title="IT 뉴스 분석 대시보드",
@@ -12,10 +9,6 @@ st.set_page_config(
 )
 
 st.title("IT 뉴스 분석 대시보드")
-
-# ---------------------------
-# AWS / S3 설정
-# ---------------------------
 
 AWS_ACCESS_KEY_ID = st.secrets["AWS_ACCESS_KEY_ID"]
 AWS_SECRET_ACCESS_KEY = st.secrets["AWS_SECRET_ACCESS_KEY"]
@@ -29,66 +22,109 @@ s3 = boto3.client(
     region_name=AWS_REGION
 )
 
-# ---------------------------
-# S3 CSV 경로
-# ---------------------------
-
 PREFIX = "it_news/IT/processed/"
+START_DATE = "20260514"
 
-# ---------------------------
-# S3에서 최신 CSV 파일 찾기
-# ---------------------------
 
-response = s3.list_objects_v2(
-    Bucket=BUCKET_NAME,
-    Prefix=PREFIX
-)
+def extract_yyyymmdd_from_key(key):
+    match = re.search(r"(\d{8})", key)
+    if match:
+        return match.group(1)
+    return None
 
-files = response.get("Contents", [])
 
-csv_files = [
-    file for file in files
-    if file["Key"].endswith(".csv")
-]
+def list_all_csv_files(bucket, prefix):
+    all_files = []
+    token = None
 
-if not csv_files:
-    st.error("S3에서 CSV 파일을 찾지 못했습니다.")
+    while True:
+        params = {
+            "Bucket": bucket,
+            "Prefix": prefix
+        }
+
+        if token:
+            params["ContinuationToken"] = token
+
+        response = s3.list_objects_v2(**params)
+
+        all_files.extend(response.get("Contents", []))
+
+        if response.get("IsTruncated"):
+            token = response.get("NextContinuationToken")
+        else:
+            break
+
+    csv_files = [
+        file for file in all_files
+        if file["Key"].endswith(".csv")
+    ]
+
+    return csv_files
+
+
+csv_files = list_all_csv_files(BUCKET_NAME, PREFIX)
+
+filtered_files = []
+
+for file in csv_files:
+    key = file["Key"]
+    file_date = extract_yyyymmdd_from_key(key)
+
+    if file_date and file_date >= START_DATE:
+        filtered_files.append(file)
+
+if not filtered_files:
+    st.error("2026년 5월 14일 이후 CSV 파일을 찾지 못했습니다.")
     st.stop()
 
-latest_file = sorted(
-    csv_files,
-    key=lambda x: x["LastModified"],
-    reverse=True
-)[0]
-
-latest_key = latest_file["Key"]
-
-st.info(f"불러온 파일: {latest_key}")
-
-# ---------------------------
-# 최신 CSV 읽기
-# ---------------------------
-
-obj = s3.get_object(
-    Bucket=BUCKET_NAME,
-    Key=latest_key
+filtered_files = sorted(
+    filtered_files,
+    key=lambda x: x["Key"]
 )
 
-df = pd.read_csv(obj["Body"])
+st.info(f"불러온 CSV 파일 수: {len(filtered_files)}개")
 
-# ---------------------------
-# 기본 데이터 확인
-# ---------------------------
+with st.expander("불러온 파일 목록"):
+    for file in filtered_files:
+        st.write(file["Key"])
+
+df_list = []
+
+for file in filtered_files:
+    key = file["Key"]
+
+    obj = s3.get_object(
+        Bucket=BUCKET_NAME,
+        Key=key
+    )
+
+    temp_df = pd.read_csv(obj["Body"])
+    temp_df["loaded_file"] = key
+
+    df_list.append(temp_df)
+
+df = pd.concat(df_list, ignore_index=True)
+
+# 중복 제거
+dedup_key_cols = []
+
+for col in ["originallink", "link", "title"]:
+    if col in df.columns:
+        dedup_key_cols.append(col)
+
+if dedup_key_cols:
+    df = df.drop_duplicates(subset=dedup_key_cols, keep="last")
 
 st.subheader("기본 정보")
 
-col1, col2, col3 = st.columns(3)
+col1, col2, col3, col4 = st.columns(4)
 
 with col1:
     st.metric("전체 기사 수", len(df))
 
 with col2:
-    st.metric("컬럼 수", len(df.columns))
+    st.metric("불러온 파일 수", len(filtered_files))
 
 with col3:
     if "media_domain" in df.columns:
@@ -98,18 +134,16 @@ with col3:
     else:
         st.metric("언론사 수", "확인 불가")
 
-st.write("컬럼 목록:", list(df.columns))
+with col4:
+    if "pubDate_ymd" in df.columns:
+        st.metric("날짜 수", df["pubDate_ymd"].nunique())
+    else:
+        st.metric("날짜 수", "확인 불가")
 
-# ---------------------------
-# 원본 데이터
-# ---------------------------
+st.write("컬럼 목록:", list(df.columns))
 
 st.subheader("원본 데이터")
 st.dataframe(df, use_container_width=True)
-
-# ---------------------------
-# 언론사별 기사 수
-# ---------------------------
 
 if "media_domain" in df.columns:
     st.subheader("언론사별 기사 수")
@@ -124,10 +158,7 @@ if "media_domain" in df.columns:
     media_count.columns = ["media_domain", "count"]
 
     st.dataframe(media_count, use_container_width=True)
-
-    st.bar_chart(
-        media_count.set_index("media_domain")
-    )
+    st.bar_chart(media_count.set_index("media_domain"))
 
 elif "source" in df.columns:
     st.subheader("수집 소스별 기사 수")
@@ -142,17 +173,7 @@ elif "source" in df.columns:
     source_count.columns = ["source", "count"]
 
     st.dataframe(source_count, use_container_width=True)
-
-    st.bar_chart(
-        source_count.set_index("source")
-    )
-
-else:
-    st.warning("media_domain 또는 source 컬럼이 없습니다.")
-
-# ---------------------------
-# 날짜별 기사 수
-# ---------------------------
+    st.bar_chart(source_count.set_index("source"))
 
 if "pubDate_ymd" in df.columns:
     st.subheader("날짜별 기사 수")
@@ -168,16 +189,7 @@ if "pubDate_ymd" in df.columns:
     date_count.columns = ["date", "count"]
 
     st.dataframe(date_count, use_container_width=True)
-
-    st.line_chart(
-        date_count.set_index("date")
-    )
-else:
-    st.warning("pubDate_ymd 컬럼이 없습니다.")
-
-# ---------------------------
-# 키워드 분석
-# ---------------------------
+    st.line_chart(date_count.set_index("date"))
 
 st.subheader("키워드별 기사 수")
 
@@ -221,14 +233,7 @@ for keyword in keywords:
 keyword_df = pd.DataFrame(keyword_result)
 
 st.dataframe(keyword_df, use_container_width=True)
-
-st.bar_chart(
-    keyword_df.set_index("keyword")
-)
-
-# ---------------------------
-# 기사 검색
-# ---------------------------
+st.bar_chart(keyword_df.set_index("keyword"))
 
 st.subheader("기사 검색")
 
@@ -237,26 +242,21 @@ search_text = st.text_input("검색어를 입력하세요")
 if search_text:
     search_df = df.copy()
 
-    condition = False
+    condition = pd.Series(False, index=search_df.index)
 
     if "title" in search_df.columns:
-        condition = search_df["title"].fillna("").str.contains(
+        condition = condition | search_df["title"].fillna("").str.contains(
             search_text,
             case=False,
             regex=False
         )
 
     if "description" in search_df.columns:
-        desc_condition = search_df["description"].fillna("").str.contains(
+        condition = condition | search_df["description"].fillna("").str.contains(
             search_text,
             case=False,
             regex=False
         )
-
-        if isinstance(condition, bool):
-            condition = desc_condition
-        else:
-            condition = condition | desc_condition
 
     result_df = search_df[condition]
 
