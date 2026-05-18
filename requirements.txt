@@ -2,3 +2,8 @@ streamlit
 pandas
 boto3
 matplotlib
+scikit-learn
+networkx
+pyvis
+beautifulsoup4
+requests
