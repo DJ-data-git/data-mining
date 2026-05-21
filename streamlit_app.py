@@ -201,16 +201,26 @@ def normalize_date(df):
 
 def prepare_df(df):
     df, date_col = normalize_date(df)
+
     for col in ["source", "source_group", "media_domain", "title", "description", "originallink", "link"]:
         if col not in df.columns:
             df[col] = ""
-    df["source"] = df["source"].fillna("unknown").astype(str).replace("", "unknown")
-    df["source_group"] = df["source_group"].fillna(df["source"]).astype(str).replace("", df["source"])
-    # 현재 데이터 품질상 source 기준 분석이 더 신뢰 가능함
-    df["analysis_source"] = df["source"].fillna("unknown").astype(str).replace("", "unknown")
+
+    df["source"] = df["source"].fillna("").astype(str)
+    df.loc[df["source"].str.strip() == "", "source"] = "unknown"
+
+    df["source_group"] = df["source_group"].fillna("").astype(str)
+    empty_group_mask = df["source_group"].str.strip() == ""
+    df.loc[empty_group_mask, "source_group"] = df.loc[empty_group_mask, "source"]
+
+    # 현재 데이터 품질상 media_domain보다 source 기준 분석이 더 신뢰 가능함
+    df["analysis_source"] = df["source"].fillna("").astype(str)
+    df.loc[df["analysis_source"].str.strip() == "", "analysis_source"] = "unknown"
+
     dedup_cols = [c for c in ["originallink", "link", "title"] if c in df.columns]
     if dedup_cols:
         df = df.drop_duplicates(subset=dedup_cols, keep="last")
+
     return df, date_col
 
 
