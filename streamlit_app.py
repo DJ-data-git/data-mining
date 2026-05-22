@@ -382,65 +382,86 @@ def render_daily_keyword_timeline(daily_df, top_n=5):
         st.warning("일별 키워드 데이터가 없습니다.")
         return
 
-    dates = sorted(daily_df["date"].dropna().unique())
+    st.markdown("### Daily Keyword Heatmap")
+    st.caption("날짜가 늘어도 한눈에 볼 수 있도록 키워드별 일자 언급량을 압축해서 보여줍니다.")
+
+    pivot = daily_df.pivot_table(
+        index="keyword",
+        columns="date",
+        values="count",
+        aggfunc="sum",
+        fill_value=0
+    )
+
+    keyword_order = pivot.sum(axis=1).sort_values(ascending=False).head(12).index
+    pivot = pivot.loc[keyword_order]
+
+    st.dataframe(
+        pivot.style.background_gradient(axis=1),
+        use_container_width=True
+    )
+
+    st.markdown("### Daily Top Keywords Drill-down")
+    selected_date = st.selectbox(
+        "상세 확인 날짜 선택",
+        sorted(daily_df["date"].dropna().unique(), reverse=True),
+        key="daily_keyword_date_select"
+    )
+
+    day_df = daily_df[daily_df["date"] == selected_date].sort_values("rank").head(top_n)
+
+    cols = st.columns(top_n)
+    prev_date_candidates = [d for d in sorted(daily_df["date"].dropna().unique()) if d < selected_date]
     prev_rank_map = {}
+    if prev_date_candidates:
+        prev_date = prev_date_candidates[-1]
+        prev_df = daily_df[daily_df["date"] == prev_date]
+        prev_rank_map = dict(zip(prev_df["keyword"], prev_df["rank"]))
 
-    st.markdown("### Trending Keywords Timeline")
-    st.caption("날짜별 TOP 키워드와 전일 대비 순위 변화를 카드 형태로 보여줍니다.")
+    for idx, (_, row) in enumerate(day_df.iterrows()):
+        keyword = row["keyword"]
+        count = int(row["count"])
+        rank = int(row["rank"])
+        prev_rank = prev_rank_map.get(keyword)
 
-    for date in dates:
-        day_df = daily_df[daily_df["date"] == date].sort_values("rank").head(top_n)
-        current_rank_map = dict(zip(day_df["keyword"], day_df["rank"]))
+        if prev_rank is None:
+            movement = "NEW"
+            movement_color = "#38bdf8"
+        elif prev_rank > rank:
+            movement = "UP"
+            movement_color = "#22c55e"
+        elif prev_rank < rank:
+            movement = "DOWN"
+            movement_color = "#ef4444"
+        else:
+            movement = "STAY"
+            movement_color = "#94a3b8"
 
-        st.markdown(f"#### {date}")
-        cols = st.columns(top_n)
-
-        for idx, (_, row) in enumerate(day_df.iterrows()):
-            keyword = row["keyword"]
-            count = int(row["count"])
-            rank = int(row["rank"])
-            prev_rank = prev_rank_map.get(keyword)
-
-            if prev_rank is None:
-                movement = "NEW"
-                movement_color = "#38bdf8"
-            elif prev_rank > rank:
-                movement = "UP"
-                movement_color = "#22c55e"
-            elif prev_rank < rank:
-                movement = "DOWN"
-                movement_color = "#ef4444"
-            else:
-                movement = "STAY"
-                movement_color = "#94a3b8"
-
-            with cols[idx]:
-                st.markdown(f"""
-                <div style="
-                    background:rgba(15,23,42,.82);
-                    border:1px solid rgba(56,189,248,.20);
-                    border-radius:18px;
-                    padding:16px 14px;
-                    min-height:135px;
-                    box-shadow:0 0 16px rgba(56,189,248,.05);
-                ">
-                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
-                        <div style="font-size:13px;color:#94a3b8;font-weight:800;">Rank {rank}</div>
-                        <div style="font-size:11px;color:{movement_color};font-weight:950;">{movement}</div>
-                    </div>
-                    <div style="font-size:20px;font-weight:950;color:#f8fafc;margin-bottom:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
-                        {keyword}
-                    </div>
-                    <div style="font-size:24px;font-weight:950;color:#38bdf8;margin-bottom:8px;">
-                        {count:,}건
-                    </div>
-                    <div style="font-size:12px;color:#64748b;line-height:1.4;">
-                        전일 대비 순위 변화 기준
-                    </div>
+        with cols[idx]:
+            st.markdown(f"""
+            <div style="
+                background:rgba(15,23,42,.82);
+                border:1px solid rgba(56,189,248,.20);
+                border-radius:18px;
+                padding:16px 14px;
+                min-height:132px;
+                box-shadow:0 0 16px rgba(56,189,248,.05);
+            ">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+                    <div style="font-size:13px;color:#94a3b8;font-weight:800;">Rank {rank}</div>
+                    <div style="font-size:11px;color:{movement_color};font-weight:950;">{movement}</div>
                 </div>
-                """, unsafe_allow_html=True)
-
-        prev_rank_map = current_rank_map
+                <div style="font-size:20px;font-weight:950;color:#f8fafc;margin-bottom:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+                    {keyword}
+                </div>
+                <div style="font-size:24px;font-weight:950;color:#38bdf8;margin-bottom:8px;">
+                    {count:,}건
+                </div>
+                <div style="font-size:12px;color:#64748b;line-height:1.4;">
+                    선택일 기준 TOP 키워드
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
 
 
 def render_keyword_trend_detail(daily_df, keyword):
