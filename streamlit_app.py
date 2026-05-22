@@ -35,8 +35,7 @@ section[data-testid="stSidebar"] {background:#020617;}
 </style>
 """, unsafe_allow_html=True)
 
-st.title("IT News Intelligence Dashboard")
-st.caption("IT 뉴스 텍스트마이닝 기반 키워드 트렌드 · 소스 분석 · 유사도 · 네트워크 · 감성/리스크 분석")
+st.title("Today’s IT Trend Radar")
 
 # =========================================================
 # Config
@@ -701,13 +700,36 @@ menu = st.session_state["menu"]
 # =========================================================
 
 if menu == "Home":
-    st.subheader("오늘의 IT 뉴스 요약")
-    c1, c2, c3, c4 = st.columns(4)
-    with c1: card("전체 기사 수", f"{len(df):,}", "중복 제거 후 분석 대상 기사")
-    with c2: card(f"{latest_date} 기사 수", f"{len(latest_df):,}", "최신일 기준 수집 기사")
-    with c3: card("수집 소스 수", f"{df['analysis_source'].nunique():,}", "source 기준")
-    with c4: card("수집 파일 수", f"{len(keys):,}", "S3 processed CSV 파일")
+    st.subheader("Today’s IT News Home")
 
+    top_kw = top_keywords.iloc[0]["keyword"] if not top_keywords.empty else "-"
+    top_kw_count = int(top_keywords.iloc[0]["count"]) if not top_keywords.empty else 0
+
+    latest_topic_df = topic_counts(latest_df)
+    top_topic = latest_topic_df.iloc[0]["topic"] if not latest_topic_df.empty else "-"
+    top_topic_count = int(latest_topic_df.iloc[0]["count"]) if not latest_topic_df.empty else 0
+
+    risk_keywords = ["보안", "해킹", "개인정보", "랜섬웨어", "침해", "취약점"]
+    risk_today_count = len(filter_keywords(latest_df, risk_keywords))
+
+    # 오늘의 메가 트렌드는 동시출현 최상위 조합 기준
+    if not net_df.empty:
+        top_pair = net_df.iloc[0]
+        mega_trend = f"{top_pair['keyword_a']} · {top_pair['keyword_b']}"
+        mega_desc = f"동시출현 {int(top_pair['co_count']):,}건"
+    else:
+        mega_trend = "-"
+        mega_desc = "동시출현 데이터 없음"
+
+    c1, c2, c3, c4 = st.columns(4)
+    with c1:
+        card("오늘 최다 키워드", top_kw, f"{top_kw_count:,}건 언급")
+    with c2:
+        card("오늘 핵심 주제", top_topic, f"{top_topic_count:,}건 관련 기사")
+    with c3:
+        card("오늘 메가 트렌드", mega_trend, mega_desc)
+    with c4:
+        card("오늘 리스크 이슈", "보안 / 개인정보", f"{risk_today_count:,}건 탐지", "#ef4444")
 
     section("오늘의 주요 IT 키워드 트렌드 TOP 10")
     keyword_chip_grid(top_keywords, "keyword", "count", None, clickable=True, session_key="home_drill_keyword")
