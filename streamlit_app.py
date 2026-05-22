@@ -590,11 +590,7 @@ for group_name, children in MENU_TREE.items():
 
 menu = st.session_state["menu"]
 
-st.sidebar.markdown("---")
-st.sidebar.markdown(f'<div class="sidebar-sub">현재 메뉴: <b>{MENU_LABELS.get(menu, menu)}</b></div>', unsafe_allow_html=True)
-st.sidebar.markdown(f'<div class="sidebar-sub">최신일: <b>{latest_date}</b></div>', unsafe_allow_html=True)
-st.sidebar.markdown(f'<div class="sidebar-sub">분석 기사 수: <b>{len(df):,}</b></div>', unsafe_allow_html=True)
-st.sidebar.markdown(f'<div class="sidebar-sub">기준: <b>source</b></div>', unsafe_allow_html=True)
+
 
 # =========================================================
 # Pages
@@ -609,8 +605,8 @@ if menu == "Home":
     with c4: card("수집 파일 수", f"{len(keys):,}", "S3 processed CSV 파일")
 
 
-    section("오늘의 주요 IT 키워드 트렌드")
-    keyword_chip_grid(top_keywords, "keyword", "count", "오늘의 주요 IT 키워드 TOP 10", clickable=True, session_key="home_drill_keyword")
+    section("오늘의 주요 IT 키워드 트렌드 TOP 10")
+    keyword_chip_grid(top_keywords, "keyword", "count", None, clickable=True, session_key="home_drill_keyword")
 
     if "home_drill_keyword" in st.session_state and st.session_state["home_drill_keyword"]:
         drill_kw = st.session_state["home_drill_keyword"]
