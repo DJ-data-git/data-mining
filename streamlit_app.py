@@ -584,22 +584,21 @@ section[data-testid="stSidebar"] {
     line-height: 1.5;
 }
 .sidebar-group-title {
-    color: #64748b;
-    font-size: 11px;
-    font-weight: 900;
-    letter-spacing: .08em;
-    text-transform: uppercase;
-    margin: 18px 0 8px 2px;
+    color: #e5e7eb;
+    font-size: 15px;
+    font-weight: 950;
+    letter-spacing: -0.02em;
+    margin: 22px 0 10px 2px;
 }
 .sidebar-current {
     position: relative;
-    background: linear-gradient(135deg, rgba(14,165,233,.26), rgba(37,99,235,.18));
-    border: 1px solid rgba(56,189,248,.55);
+    background: linear-gradient(135deg, rgba(14,165,233,.22), rgba(37,99,235,.14));
+    border: 1px solid rgba(56,189,248,.52);
     color: #f8fafc;
-    border-radius: 16px;
-    padding: 0.82rem 0.82rem;
-    margin-bottom: 0.45rem;
-    box-shadow: 0 0 24px rgba(56,189,248,.10), inset 0 1px 0 rgba(255,255,255,.05);
+    border-radius: 15px;
+    padding: 0.68rem 0.76rem;
+    margin-bottom: 0.42rem;
+    box-shadow: 0 0 20px rgba(56,189,248,.08), inset 0 1px 0 rgba(255,255,255,.05);
 }
 .sidebar-current:before {
     content: "";
@@ -616,7 +615,7 @@ section[data-testid="stSidebar"] {
     align-items: center;
     gap: 10px;
     font-size: 14px;
-    font-weight: 900;
+    font-weight: 850;
 }
 .sidebar-icon {
     display: inline-flex;
@@ -639,15 +638,17 @@ section[data-testid="stSidebar"] {
 }
 section[data-testid="stSidebar"] button {
     width: 100%;
-    border-radius: 16px !important;
-    border: 1px solid rgba(148,163,184,.16) !important;
-    background: rgba(15,23,42,.52) !important;
-    color: #e5e7eb !important;
+    border-radius: 14px !important;
+    border: 1px solid rgba(148,163,184,.14) !important;
+    background: rgba(15,23,42,.48) !important;
+    color: #cbd5e1 !important;
     text-align: left !important;
-    padding: 0.68rem 0.78rem !important;
-    margin-bottom: 0.42rem !important;
+    padding: 0.56rem 0.72rem !important;
+    margin-bottom: 0.38rem !important;
     box-shadow: none !important;
     transition: all .15s ease !important;
+    font-size: 13px !important;
+    font-weight: 700 !important;
 }
 section[data-testid="stSidebar"] button:hover {
     transform: translateX(2px);
