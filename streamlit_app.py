@@ -777,7 +777,7 @@ if menu == "Home":
 
     for col, item in zip(insight_cols, insight_cards):
         with col:
-            st.markdown(f'''
+            html = f"""
             <div style="
                 background:rgba(15,23,42,.82);
                 border:1px solid rgba(56,189,248,.18);
@@ -813,7 +813,8 @@ if menu == "Home":
                     {item['desc']}
                 </div>
             </div>
-            ''', unsafe_allow_html=True)
+            """
+            st.markdown(html, unsafe_allow_html=True)
 
 elif menu == "Keyword":
     st.subheader("키워드 분석")
