@@ -90,11 +90,14 @@ s3 = boto3.client(
 S3_PREFIX = "it_news/IT/processed/"
 START_DATE = "20260514"
 
-MAIN_KEYWORDS = [
+CORE_KEYWORDS = [
     "AI", "인공지능", "생성형AI", "챗GPT", "반도체", "클라우드", "보안", "데이터",
     "로봇", "배터리", "전기차", "삼성", "네이버", "카카오", "엔비디아",
     "AWS", "Azure", "해킹", "개인정보", "데이터센터", "HBM"
 ]
+
+# MAIN_KEYWORDS는 이후 데이터 기반 자동 키워드와 결합해 하이브리드 방식으로 재정의됨
+MAIN_KEYWORDS = CORE_KEYWORDS.copy()
 
 TOPIC_MAP = {
     "AI/인공지능": ["AI", "인공지능", "생성형AI", "챗GPT", "엔비디아"],
@@ -327,14 +330,49 @@ def filter_keywords(df, keywords):
 
 def keyword_counts(df, keywords):
     txt = text_series(df)
-    return pd.DataFrame([
-        {"keyword": kw, "count": int(txt.str.contains(kw, case=False, regex=False).sum())}
-        for kw in keywords
-    ]).sort_values("count", ascending=False)
+    rows = []
+    for kw in keywords:
+        count = int(txt.str.contains(kw, case=False, regex=False).sum())
+        if count > 0:
+            rows.append({"keyword": kw, "count": count})
+    if not rows:
+        return pd.DataFrame(columns=["keyword", "count"])
+    return pd.DataFrame(rows).sort_values("count", ascending=False)
 
 # =========================================================
 # Analysis Functions
 # =========================================================
+
+def extract_dynamic_keywords(df, top_n=20):
+    """
+    데이터에서 자동으로 떠오르는 키워드를 추출한다.
+    단, 무의미한 일반어를 줄이기 위해 IT 후보 키워드 사전 안에서만 추출한다.
+    """
+    tfidf_df = tfidf_keywords(df, top_n=top_n)
+    if tfidf_df.empty:
+        return []
+    return tfidf_df["keyword"].dropna().astype(str).tolist()
+
+
+def build_hybrid_keywords(df, core_keywords=None, dynamic_top_n=20, max_total=40):
+    """
+    Core Keywords + Dynamic Keywords 결합.
+    - Core: 분석의 안정성을 위한 고정 IT 핵심 키워드
+    - Dynamic: 최신 뉴스 데이터에서 자동 추출된 emerging keyword
+    """
+    if core_keywords is None:
+        core_keywords = CORE_KEYWORDS
+
+    dynamic_keywords = extract_dynamic_keywords(df, top_n=dynamic_top_n)
+
+    merged = []
+    for kw in list(core_keywords) + dynamic_keywords:
+        kw = str(kw).strip()
+        if kw and kw not in merged:
+            merged.append(kw)
+
+    return merged[:max_total], dynamic_keywords
+
 
 def classify_sentiment(df):
     pos_words = ["성장", "확대", "출시", "투자", "협력", "개선", "강화", "수주", "증가", "성공", "최초", "고도화", "혁신"]
@@ -788,7 +826,7 @@ def network_html(net_df, top_n=25):
         "smooth": {"enabled": true, "type": "continuous"}
       },
       "physics": {
-        "enabled": true
+        "enabled": false
       }
     }
     """)
@@ -862,6 +900,8 @@ latest_df = df[df[DATE_COL] == latest_date].copy()
 df["sentiment_group"] = classify_sentiment(df)
 latest_df["sentiment_group"] = classify_sentiment(latest_df)
 
+MAIN_KEYWORDS, DYNAMIC_KEYWORDS = build_hybrid_keywords(latest_df, CORE_KEYWORDS, dynamic_top_n=20, max_total=40)
+
 top_keywords = keyword_counts(latest_df, MAIN_KEYWORDS).head(10)
 daily_kw = daily_top_keywords(df, DATE_COL)
 net_df = keyword_network(df)
@@ -924,6 +964,18 @@ with tab_home:
         card("오늘 메가 트렌드", mega_trend, mega_desc)
     with c4:
         card("오늘 리스크 이슈", "보안 / 개인정보", f"{risk_today_count:,}건 탐지", "#ef4444")
+
+    if DYNAMIC_KEYWORDS:
+        section("Emerging IT Keywords", "최신 뉴스 데이터에서 자동 추출된 동적 키워드입니다.")
+        dynamic_df = keyword_counts(latest_df, DYNAMIC_KEYWORDS).head(10)
+        keyword_chip_grid(dynamic_df, "keyword", "count", None, clickable=True, session_key="dynamic_drill_keyword")
+
+        if "dynamic_drill_keyword" in st.session_state and st.session_state["dynamic_drill_keyword"]:
+            dynamic_kw = st.session_state["dynamic_drill_keyword"]
+            dynamic_news = filter_keyword(df, dynamic_kw)
+            st.markdown("### 선택 Emerging Keyword 관련 뉴스")
+            st.info(f"선택된 키워드: {dynamic_kw} / 관련 기사 수: {len(dynamic_news):,}건")
+            article_table(dynamic_news, DATE_COL)
 
     section("Today’s Top 10 IT Keywords")
     keyword_chip_grid(top_keywords, "keyword", "count", None, clickable=True, session_key="home_drill_keyword")
