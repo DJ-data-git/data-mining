@@ -71,23 +71,26 @@ TOPIC_MAP = {
 }
 
 STOPWORDS = [
-    # English stopwords
     "the", "and", "for", "that", "with", "this", "from", "have", "will", "into", "about",
     "their", "they", "them", "were", "been", "being", "said", "more", "than", "over",
     "after", "before", "while", "where", "when", "what", "which", "would", "could", "should",
     "there", "these", "those", "because", "through", "during", "under", "between", "among",
     "it", "to", "of", "in", "is", "on", "at", "by", "be", "as", "an", "or", "if", "we",
-    "he", "she", "you", "are", "was", "has", "had", "can", "not",
-    # News/common words
+    "he", "she", "you", "are", "was", "has", "had", "can", "not", "also", "but", "how",
     "news", "media", "report", "reports", "update", "service", "platform", "technology", "tech",
-    "company", "companies", "market", "business",
-    # Korean common words
-    "관련", "통해", "기자", "이번", "대한", "위한", "있는", "한다", "했다", "하는", "등의", "등을",
+    "company", "companies", "market", "business", "press", "article",
+    "daum", "net", "com", "kr", "www", "naver", "google", "rss", "site",
+    "trump", "president", "government", "white", "house",
+    "관련", "통해", "기자", "이번", "대한", "위한", "있는", "있다", "한다", "했다", "하는", "등의", "등을",
     "에서", "으로", "까지", "지난", "오늘", "올해", "최근", "발표", "제공", "추진", "확대",
-    "서비스", "기업", "기술", "산업", "시장", "뉴스",
-    # Too broad as TF-IDF single token
+    "서비스", "기업", "기술", "산업", "시장", "뉴스", "정보기술",
     "ai", "it"
 ]
+
+ALLOW_ENGLISH_TERMS = {
+    "aws", "azure", "hbm", "gpu", "nvidia", "openai", "chatgpt", "gpt", "llm", "skt", "kt",
+    "lg", "sk", "ms", "meta", "apple", "cloud", "security", "data", "server", "semiconductor"
+}
 
 # =========================================================
 # UI helpers
@@ -313,16 +316,61 @@ def keyword_network(df):
     return pd.DataFrame(rows, columns=["keyword_a", "keyword_b"]).value_counts().reset_index(name="co_count").sort_values("co_count", ascending=False)
 
 
+def is_valid_tfidf_keyword(keyword):
+    keyword = str(keyword).strip().lower()
+
+    if not keyword or keyword in STOPWORDS:
+        return False
+
+    parts = keyword.split()
+
+    if any(part in STOPWORDS for part in parts):
+        return False
+
+    # 영어만 있는 일반 단어는 제거하고, IT 용어 화이트리스트는 유지
+    if re.fullmatch("[a-z0-9 ]+", keyword):
+        compact = keyword.replace(" ", "")
+        if compact not in ALLOW_ENGLISH_TERMS:
+            return False
+
+    if re.fullmatch("[0-9]+", keyword):
+        return False
+
+    if len(keyword.replace(" ", "")) < 2:
+        return False
+
+    return True
+
+
 def tfidf_keywords(df, top_n=20):
     txt = text_series(df).fillna("").astype(str)
+
     if len(txt) == 0 or txt.str.strip().eq("").all():
         return pd.DataFrame(columns=["keyword", "score"])
-    vec = TfidfVectorizer(max_features=1500, stop_words=STOPWORDS, token_pattern=r"(?u)\b[가-힣A-Za-z0-9]{2,}\b", ngram_range=(1, 2))
+
+    vec = TfidfVectorizer(
+        max_features=2500,
+        stop_words=STOPWORDS,
+        token_pattern="(?u)\\b[가-힣A-Za-z0-9]{2,}\\b",
+        ngram_range=(1, 2),
+        min_df=2,
+        max_df=0.75,
+        lowercase=True,
+    )
+
     try:
         mat = vec.fit_transform(txt)
     except ValueError:
         return pd.DataFrame(columns=["keyword", "score"])
-    return pd.DataFrame({"keyword": vec.get_feature_names_out(), "score": mat.sum(axis=0).A1}).sort_values("score", ascending=False).head(top_n)
+
+    result = pd.DataFrame({
+        "keyword": vec.get_feature_names_out(),
+        "score": mat.sum(axis=0).A1,
+    }).sort_values("score", ascending=False)
+
+    result = result[result["keyword"].apply(is_valid_tfidf_keyword)]
+
+    return result.head(top_n).reset_index(drop=True)
 
 
 def similar_articles(df, keyword, top_n=10):
