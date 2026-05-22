@@ -788,7 +788,7 @@ def network_html(net_df, top_n=25):
         "smooth": {"enabled": true, "type": "continuous"}
       },
       "physics": {
-        "enabled": false
+        "enabled": true
       }
     }
     """)
