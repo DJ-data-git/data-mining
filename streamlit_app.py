@@ -559,7 +559,7 @@ tab_home, tab_keyword, tab_trend, tab_network, tab_source, tab_sentiment, tab_se
 
 
 with tab_home:
-    st.subheader("Today’s IT News Home")
+    st.subheader("Today’s IT News Briefing")
 
     top_kw = top_keywords.iloc[0]["keyword"] if not top_keywords.empty else "-"
     top_kw_count = int(top_keywords.iloc[0]["count"]) if not top_keywords.empty else 0
@@ -590,7 +590,7 @@ with tab_home:
     with c4:
         card("오늘 리스크 이슈", "보안 / 개인정보", f"{risk_today_count:,}건 탐지", "#ef4444")
 
-    section("오늘의 주요 IT 키워드 트렌드 TOP 10")
+    section("Today’s Top 10 IT Keywords")
     keyword_chip_grid(top_keywords, "keyword", "count", None, clickable=True, session_key="home_drill_keyword")
 
     if "home_drill_keyword" in st.session_state and st.session_state["home_drill_keyword"]:
@@ -600,7 +600,7 @@ with tab_home:
         st.info(f"선택된 키워드: {drill_kw} / 관련 기사 수: {len(drill_df):,}건")
         article_table(drill_df, DATE_COL)
 
-    section("Today’s Insights")
+    section("Today’s Key Insights")
 
     ai_semi_count = 0
     risk_count = 0
