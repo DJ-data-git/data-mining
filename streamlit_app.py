@@ -377,6 +377,100 @@ def daily_top_keywords(df, date_col, top_n=5):
     return pd.DataFrame(rows)
 
 
+def render_daily_keyword_timeline(daily_df, top_n=5):
+    if daily_df.empty:
+        st.warning("일별 키워드 데이터가 없습니다.")
+        return
+
+    dates = sorted(daily_df["date"].dropna().unique())
+    prev_rank_map = {}
+
+    st.markdown("### Trending Keywords Timeline")
+    st.caption("날짜별 TOP 키워드와 전일 대비 순위 변화를 카드 형태로 보여줍니다.")
+
+    for date in dates:
+        day_df = daily_df[daily_df["date"] == date].sort_values("rank").head(top_n)
+        current_rank_map = dict(zip(day_df["keyword"], day_df["rank"]))
+
+        st.markdown(f"#### {date}")
+        cols = st.columns(top_n)
+
+        for idx, (_, row) in enumerate(day_df.iterrows()):
+            keyword = row["keyword"]
+            count = int(row["count"])
+            rank = int(row["rank"])
+            prev_rank = prev_rank_map.get(keyword)
+
+            if prev_rank is None:
+                movement = "NEW"
+                movement_color = "#38bdf8"
+            elif prev_rank > rank:
+                movement = "UP"
+                movement_color = "#22c55e"
+            elif prev_rank < rank:
+                movement = "DOWN"
+                movement_color = "#ef4444"
+            else:
+                movement = "STAY"
+                movement_color = "#94a3b8"
+
+            with cols[idx]:
+                st.markdown(f"""
+                <div style="
+                    background:rgba(15,23,42,.82);
+                    border:1px solid rgba(56,189,248,.20);
+                    border-radius:18px;
+                    padding:16px 14px;
+                    min-height:135px;
+                    box-shadow:0 0 16px rgba(56,189,248,.05);
+                ">
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+                        <div style="font-size:13px;color:#94a3b8;font-weight:800;">Rank {rank}</div>
+                        <div style="font-size:11px;color:{movement_color};font-weight:950;">{movement}</div>
+                    </div>
+                    <div style="font-size:20px;font-weight:950;color:#f8fafc;margin-bottom:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+                        {keyword}
+                    </div>
+                    <div style="font-size:24px;font-weight:950;color:#38bdf8;margin-bottom:8px;">
+                        {count:,}건
+                    </div>
+                    <div style="font-size:12px;color:#64748b;line-height:1.4;">
+                        전일 대비 순위 변화 기준
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+
+        prev_rank_map = current_rank_map
+
+
+def render_keyword_trend_detail(daily_df, keyword):
+    selected = daily_df[daily_df["keyword"] == keyword].sort_values("date")
+
+    if selected.empty:
+        st.warning(f"'{keyword}' 키워드의 일별 데이터가 없습니다.")
+        return
+
+    st.markdown(f"### '{keyword}' Daily Movement")
+
+    cols = st.columns(3)
+    with cols[0]:
+        card("등장 일수", f"{selected['date'].nunique():,}일", "TOP 키워드에 포함된 날짜 수")
+    with cols[1]:
+        card("최고 순위", f"{int(selected['rank'].min())}위", "기간 내 가장 높은 순위")
+    with cols[2]:
+        card("최대 기사 수", f"{int(selected['count'].max()):,}건", "하루 기준 최대 언급량")
+
+    progress_list(
+        selected.sort_values("count", ascending=False),
+        "date",
+        "count",
+        f"'{keyword}' 언급량이 높았던 날짜",
+        top_n=min(10, len(selected))
+    )
+
+    st.dataframe(selected, use_container_width=True)
+
+
 def topic_timeseries(df, date_col):
     rows = []
     for date in sorted(df[date_col].dropna().unique()):
@@ -843,10 +937,13 @@ with tab_topic:
         )
 
 with tab_trend:
-    section("일별 주요 IT 키워드", "날짜별 TOP 키워드 변화로 이슈 흐름을 확인합니다.")
-    st.dataframe(daily_kw, use_container_width=True)
-    sel_kw = st.selectbox("키워드별 일자 추이 확인", MAIN_KEYWORDS)
-    st.dataframe(daily_kw[daily_kw["keyword"] == sel_kw], use_container_width=True)
+    section("Trending Keywords Timeline", "날짜별 TOP 키워드를 카드형 타임라인으로 보여주고 전일 대비 변화를 확인합니다.")
+    render_daily_keyword_timeline(daily_kw, top_n=5)
+
+    section("Keyword Movement Detail", "선택한 키워드가 어느 날짜에 강하게 등장했는지 확인합니다.")
+    available_keywords = daily_kw["keyword"].dropna().unique().tolist() if not daily_kw.empty else MAIN_KEYWORDS
+    sel_kw = st.selectbox("키워드별 일자 추이 확인", available_keywords)
+    render_keyword_trend_detail(daily_kw, sel_kw)
 
     section("주제별 시계열 트렌드")
     st.dataframe(topic_ts_df, use_container_width=True)
