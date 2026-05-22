@@ -777,44 +777,12 @@ if menu == "Home":
 
     for col, item in zip(insight_cols, insight_cards):
         with col:
-            html = f"""
-            <div style="
-                background:rgba(15,23,42,.82);
-                border:1px solid rgba(56,189,248,.18);
-                border-radius:22px;
-                padding:24px;
-                min-height:190px;
-                box-shadow:0 0 20px rgba(56,189,248,.05);
-            ">
-                <div style="
-                    font-size:18px;
-                    font-weight:900;
-                    color:{item['color']};
-                    margin-bottom:12px;
-                    line-height:1.4;
-                ">
-                    {item['title']}
-                </div>
-
-                <div style="
-                    font-size:34px;
-                    font-weight:950;
-                    color:#f8fafc;
-                    margin-bottom:12px;
-                ">
-                    {item['value']}
-                </div>
-
-                <div style="
-                    color:#cbd5e1;
-                    font-size:14px;
-                    line-height:1.8;
-                ">
-                    {item['desc']}
-                </div>
-            </div>
-            """
-            st.markdown(html, unsafe_allow_html=True)
+            card(
+                item["title"],
+                item["value"],
+                item["desc"],
+                item["color"]
+            )
 
 elif menu == "Keyword":
     st.subheader("키워드 분석")
