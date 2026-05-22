@@ -343,34 +343,73 @@ def is_valid_tfidf_keyword(keyword):
 
 
 def tfidf_keywords(df, top_n=20):
+    """
+    자유 단어 추출형 TF-IDF가 아니라 IT 키워드 사전 기반 TF-IDF.
+    뉴스 문장에는 the, daum, net, 있다, 넘어 같은 노이즈가 많기 때문에
+    분석 목적에 맞는 IT 후보 키워드 안에서만 중요도를 계산한다.
+    """
     txt = text_series(df).fillna("").astype(str)
 
     if len(txt) == 0 or txt.str.strip().eq("").all():
-        return pd.DataFrame(columns=["keyword", "score"])
+        return pd.DataFrame(columns=["keyword", "score", "article_count"])
 
-    vec = TfidfVectorizer(
-        max_features=2500,
-        stop_words=STOPWORDS,
-        token_pattern="(?u)\\b[가-힣A-Za-z0-9]{2,}\\b",
-        ngram_range=(1, 2),
-        min_df=2,
-        max_df=0.75,
-        lowercase=True,
-    )
+    candidate_keywords = [
+        # AI
+        "AI", "인공지능", "생성형AI", "생성형 AI", "LLM", "챗GPT", "ChatGPT", "GPT", "OpenAI",
+        "멀티모달", "AI 에이전트", "AI 검색", "AI 서비스",
 
-    try:
-        mat = vec.fit_transform(txt)
-    except ValueError:
-        return pd.DataFrame(columns=["keyword", "score"])
+        # Semiconductor
+        "반도체", "AI반도체", "AI 반도체", "HBM", "GPU", "엔비디아", "NVIDIA",
+        "삼성전자", "SK하이닉스", "파운드리", "메모리", "칩", "첨단 반도체",
 
-    result = pd.DataFrame({
-        "keyword": vec.get_feature_names_out(),
-        "score": mat.sum(axis=0).A1,
-    }).sort_values("score", ascending=False)
+        # Cloud / Infra
+        "클라우드", "AWS", "Azure", "데이터센터", "데이터 센터", "서버", "인프라",
+        "SaaS", "쿠버네티스", "Kubernetes", "클라우드 전환",
 
-    result = result[result["keyword"].apply(is_valid_tfidf_keyword)]
+        # Security
+        "보안", "해킹", "개인정보", "랜섬웨어", "침해", "취약점", "사이버 공격",
+        "정보보호", "제로트러스트", "인증", "망분리",
 
-    return result.head(top_n).reset_index(drop=True)
+        # Mobility / Robot / Battery
+        "로봇", "전기차", "배터리", "자율주행", "모빌리티", "이차전지", "전장",
+
+        # Platform / Big Tech
+        "네이버", "카카오", "구글", "애플", "메타", "마이크로소프트", "MS",
+        "플랫폼", "빅테크", "검색", "커머스",
+
+        # Data / Software
+        "데이터", "빅데이터", "소프트웨어", "디지털", "DX", "디지털전환",
+        "핀테크", "블록체인", "가상자산", "메타버스"
+    ]
+
+    total_docs = len(txt)
+    rows = []
+
+    for keyword in candidate_keywords:
+        contains = txt.str.contains(keyword, case=False, regex=False)
+        article_count = int(contains.sum())
+
+        if article_count == 0:
+            continue
+
+        # 후보 키워드가 등장한 기사 수 기반 TF-IDF 유사 점수
+        # 많이 등장하되, 모든 기사에 흔하게 퍼진 키워드는 과도하게 커지지 않도록 보정
+        tf = article_count
+        idf = 1 + pd.np.log((1 + total_docs) / (1 + article_count)) if hasattr(pd, "np") else 1 + __import__("math").log((1 + total_docs) / (1 + article_count))
+        score = tf * idf
+
+        rows.append({
+            "keyword": keyword,
+            "score": round(score, 4),
+            "article_count": article_count
+        })
+
+    result = pd.DataFrame(rows)
+
+    if result.empty:
+        return pd.DataFrame(columns=["keyword", "score", "article_count"])
+
+    return result.sort_values("score", ascending=False).head(top_n).reset_index(drop=True)
 
 
 def similar_articles(df, keyword, top_n=10):
