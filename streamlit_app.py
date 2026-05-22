@@ -741,11 +741,79 @@ if menu == "Home":
         st.info(f"선택된 키워드: {drill_kw} / 관련 기사 수: {len(drill_df):,}건")
         article_table(drill_df, DATE_COL)
 
-    section(f"{latest_date} 주요 이슈 자동 요약")
-    cols = st.columns(3)
-    for idx, (_, row) in enumerate(topic_df.iterrows()):
-        with cols[idx % 3]:
-            card(row["topic"], f"{int(row['count']):,}건", row["keywords"])
+    section("Today’s Insights")
+
+    ai_semi_count = 0
+    risk_count = 0
+    cloud_count = 0
+
+    if not latest_df.empty:
+        ai_semi_count = len(filter_keywords(latest_df, ["AI반도체", "AI 반도체", "HBM", "GPU", "엔비디아", "반도체"]))
+        risk_count = len(filter_keywords(latest_df, ["보안", "해킹", "개인정보", "랜섬웨어", "침해", "취약점"]))
+        cloud_count = len(filter_keywords(latest_df, ["클라우드", "AWS", "Azure", "데이터센터", "서버", "인프라"]))
+
+    insight_cards = [
+        {
+            "title": "AI와 반도체 결합 이슈 증가",
+            "value": f"{ai_semi_count:,}건",
+            "desc": "HBM · GPU · AI반도체 관련 보도가 함께 증가하는 흐름",
+            "color": "#38bdf8"
+        },
+        {
+            "title": "보안 리스크 지속 확대",
+            "value": f"{risk_count:,}건",
+            "desc": "개인정보 · 해킹 · 침해 · 취약점 중심의 리스크 보도 감지",
+            "color": "#ef4444"
+        },
+        {
+            "title": "클라우드 인프라 확장",
+            "value": f"{cloud_count:,}건",
+            "desc": "AWS · Azure · 데이터센터 · 서버 인프라 관련 보도 흐름",
+            "color": "#22c55e"
+        }
+    ]
+
+    insight_cols = st.columns(3)
+
+    for col, item in zip(insight_cols, insight_cards):
+        with col:
+            st.markdown(f'''
+            <div style="
+                background:rgba(15,23,42,.82);
+                border:1px solid rgba(56,189,248,.18);
+                border-radius:22px;
+                padding:24px;
+                min-height:190px;
+                box-shadow:0 0 20px rgba(56,189,248,.05);
+            ">
+                <div style="
+                    font-size:18px;
+                    font-weight:900;
+                    color:{item['color']};
+                    margin-bottom:12px;
+                    line-height:1.4;
+                ">
+                    {item['title']}
+                </div>
+
+                <div style="
+                    font-size:34px;
+                    font-weight:950;
+                    color:#f8fafc;
+                    margin-bottom:12px;
+                ">
+                    {item['value']}
+                </div>
+
+                <div style="
+                    color:#cbd5e1;
+                    font-size:14px;
+                    line-height:1.8;
+                ">
+                    {item['desc']}
+                </div>
+            </div>
+            ''', unsafe_allow_html=True)
 
 elif menu == "Keyword":
     st.subheader("키워드 분석")
