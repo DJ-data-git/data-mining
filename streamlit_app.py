@@ -32,10 +32,43 @@ h2,h3 {color:#e5e7eb; font-weight:800;}
 .stTextInput input {background:#020617; color:#e5e7eb; border:1px solid #334155; border-radius:12px;}
 hr {border:none; height:1px; background:linear-gradient(90deg,transparent,#38bdf8,transparent); margin:2rem 0;}
 section[data-testid="stSidebar"] {background:#020617;}
+/* Premium top tab navigation */
+.stTabs [data-baseweb="tab-list"] {
+    gap: 10px;
+    background: rgba(15,23,42,.62);
+    border: 1px solid rgba(148,163,184,.16);
+    padding: 10px;
+    border-radius: 20px;
+    box-shadow: 0 0 24px rgba(56,189,248,.06);
+}
+.stTabs [data-baseweb="tab"] {
+    height: 46px;
+    border-radius: 14px;
+    padding: 0 18px;
+    background: rgba(2,6,23,.45);
+    border: 1px solid rgba(148,163,184,.10);
+    color: #94a3b8;
+    font-weight: 800;
+    letter-spacing: -0.01em;
+}
+.stTabs [data-baseweb="tab"]:hover {
+    background: rgba(30,41,59,.8);
+    color: #e5e7eb;
+    border: 1px solid rgba(56,189,248,.35);
+}
+.stTabs [aria-selected="true"] {
+    background: linear-gradient(135deg, rgba(14,165,233,.95), rgba(37,99,235,.92)) !important;
+    color: #ffffff !important;
+    border: 1px solid rgba(125,211,252,.8) !important;
+    box-shadow: 0 0 20px rgba(56,189,248,.25);
+}
+.stTabs [data-baseweb="tab-highlight"] {
+    display: none;
+}
 </style>
 """, unsafe_allow_html=True)
 
-st.title("Today’s IT Trend Radar")
+st.title("IT News Insight Center")
 
 # =========================================================
 # Config
