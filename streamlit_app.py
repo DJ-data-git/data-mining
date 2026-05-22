@@ -461,11 +461,29 @@ topic_ts_df = topic_timeseries(df, DATE_COL)
 # =========================================================
 
 # =========================================================
-# Custom Sidebar Menu
+# Tree Sidebar Menu
 # =========================================================
 
-MENU_ITEMS = {
-    "Home": "오늘의 뉴스",
+MENU_TREE = {
+    "오늘의 뉴스": {
+        "Home": "뉴스 요약"
+    },
+    "텍스트 분석": {
+        "Keyword": "키워드 분석",
+        "Trend": "시계열 분석",
+        "Network": "네트워크 분석"
+    },
+    "비교 분석": {
+        "Source": "소스 분석",
+        "Sentiment": "감성/리스크"
+    },
+    "데이터 탐색": {
+        "Search": "기사 검색"
+    }
+}
+
+MENU_LABELS = {
+    "Home": "뉴스 요약",
     "Keyword": "키워드 분석",
     "Trend": "시계열 분석",
     "Network": "네트워크 분석",
@@ -484,47 +502,55 @@ st.sidebar.markdown("""
 <style>
 section[data-testid="stSidebar"] button {
     width: 100%;
-    border-radius: 14px !important;
-    border: 1px solid rgba(56,189,248,.25) !important;
-    background: rgba(15,23,42,.88) !important;
+    border-radius: 12px !important;
+    border: 1px solid rgba(56,189,248,.18) !important;
+    background: rgba(15,23,42,.72) !important;
     color: #e5e7eb !important;
     text-align: left !important;
-    padding: 0.7rem 0.9rem !important;
-    margin-bottom: 0.35rem !important;
+    padding: 0.55rem 0.75rem !important;
+    margin-bottom: 0.25rem !important;
     box-shadow: none !important;
 }
 section[data-testid="stSidebar"] button:hover {
-    background: linear-gradient(135deg, rgba(2,132,199,.95), rgba(37,99,235,.95)) !important;
-    border: 1px solid rgba(56,189,248,.8) !important;
+    background: linear-gradient(135deg, rgba(2,132,199,.9), rgba(37,99,235,.9)) !important;
+    border: 1px solid rgba(56,189,248,.75) !important;
 }
 .sidebar-current {
     background: linear-gradient(135deg, #0284c7, #2563eb);
     color: white;
-    border-radius: 14px;
-    padding: 0.75rem 0.95rem;
+    border-radius: 12px;
+    padding: 0.58rem 0.78rem;
     font-weight: 900;
-    margin-bottom: 0.45rem;
+    margin-bottom: 0.3rem;
     border: 1px solid rgba(56,189,248,.8);
+    font-size: 14px;
+}
+.sidebar-child {
+    padding-left: 0.55rem;
 }
 .sidebar-sub {
     color: #94a3b8;
     font-size: 13px;
-    margin-bottom: 12px;
+    margin-bottom: 10px;
 }
 </style>
 """, unsafe_allow_html=True)
 
-for key, label in MENU_ITEMS.items():
-    if st.session_state["menu"] == key:
-        st.sidebar.markdown(f'<div class="sidebar-current">{label}</div>', unsafe_allow_html=True)
-    else:
-        if st.sidebar.button(label, key=f"menu_{key}"):
-            st.session_state["menu"] = key
-            st.rerun()
+for group_name, children in MENU_TREE.items():
+    expanded = st.session_state["menu"] in children.keys()
+    with st.sidebar.expander(group_name, expanded=expanded):
+        for key, label in children.items():
+            if st.session_state["menu"] == key:
+                st.markdown(f'<div class="sidebar-current">{label}</div>', unsafe_allow_html=True)
+            else:
+                if st.button(label, key=f"menu_{key}"):
+                    st.session_state["menu"] = key
+                    st.rerun()
 
 menu = st.session_state["menu"]
 
 st.sidebar.markdown("---")
+st.sidebar.markdown(f'<div class="sidebar-sub">현재 메뉴: <b>{MENU_LABELS.get(menu, menu)}</b></div>', unsafe_allow_html=True)
 st.sidebar.markdown(f'<div class="sidebar-sub">최신일: <b>{latest_date}</b></div>', unsafe_allow_html=True)
 st.sidebar.markdown(f'<div class="sidebar-sub">분석 기사 수: <b>{len(df):,}</b></div>', unsafe_allow_html=True)
 st.sidebar.markdown(f'<div class="sidebar-sub">기준: <b>source</b></div>', unsafe_allow_html=True)
