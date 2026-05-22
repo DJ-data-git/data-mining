@@ -11,6 +11,8 @@ import streamlit.components.v1 as components
 from pyvis.network import Network
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
+from gensim import corpora
+from gensim.models import CoherenceModel, LdaModel
 
 # =========================================================
 # Page / Style
@@ -436,6 +438,91 @@ def similar_articles(df, keyword, top_n=10):
     return out.sort_values("similarity_score", ascending=False)[cols].head(top_n)
 
 
+def tokenize_for_lda(df, max_docs=600):
+    """
+    LDA용 간단 토큰화.
+    KoNLPy 없이 Streamlit Cloud에서 가볍게 돌리기 위해 IT 후보 키워드 사전 기반으로 문서별 토큰을 구성한다.
+    """
+    sample_df = df.copy()
+    if len(sample_df) > max_docs:
+        sample_df = sample_df.sample(max_docs, random_state=42)
+
+    docs = []
+    for text in text_series(sample_df).fillna("").astype(str):
+        tokens = []
+        lower_text = text.lower()
+        for kw in IT_TFIDF_CANDIDATES:
+            if kw.lower() in lower_text:
+                normalized = kw.replace(" ", "_").lower()
+                tokens.append(normalized)
+        if len(tokens) >= 2:
+            docs.append(tokens)
+    return docs
+
+
+@st.cache_data(ttl=1800)
+def compute_lda_coherence(tokenized_docs, start=2, limit=10):
+    if not tokenized_docs or len(tokenized_docs) < 10:
+        return pd.DataFrame(columns=["k", "coherence"]), None, None, []
+
+    dictionary = corpora.Dictionary(tokenized_docs)
+    dictionary.filter_extremes(no_below=2, no_above=0.8)
+
+    if len(dictionary) < 5:
+        return pd.DataFrame(columns=["k", "coherence"]), None, None, []
+
+    corpus = [dictionary.doc2bow(text) for text in tokenized_docs]
+    corpus = [doc for doc in corpus if len(doc) > 0]
+
+    if len(corpus) < 10:
+        return pd.DataFrame(columns=["k", "coherence"]), None, None, []
+
+    scores = []
+    models = {}
+
+    max_k = min(limit, max(start, len(dictionary) - 1))
+
+    for k in range(start, max_k + 1):
+        model = LdaModel(
+            corpus=corpus,
+            id2word=dictionary,
+            num_topics=k,
+            random_state=42,
+            passes=8,
+            iterations=80,
+            alpha="auto",
+            eta="auto"
+        )
+
+        coherence_model = CoherenceModel(
+            model=model,
+            texts=tokenized_docs,
+            dictionary=dictionary,
+            coherence="c_v"
+        )
+
+        score = coherence_model.get_coherence()
+        scores.append({"k": k, "coherence": round(float(score), 4)})
+        models[k] = model
+
+    score_df = pd.DataFrame(scores)
+    if score_df.empty:
+        return score_df, None, dictionary, corpus
+
+    best_k = int(score_df.loc[score_df["coherence"].idxmax(), "k"])
+    best_model = models[best_k]
+
+    topics = []
+    for topic_id, words in best_model.show_topics(num_topics=best_k, num_words=8, formatted=False):
+        topic_words = [word for word, _ in words]
+        topics.append({
+            "topic_id": topic_id + 1,
+            "top_words": ", ".join(topic_words)
+        })
+
+    return score_df, best_model, dictionary, topics
+
+
 def source_keyword_table(df):
     rows = []
     for src in df["analysis_source"].value_counts().head(15).index:
@@ -543,9 +630,10 @@ topic_ts_df = topic_timeseries(df, DATE_COL)
 # Top Tab Menu
 # =========================================================
 
-tab_home, tab_keyword, tab_trend, tab_network, tab_source, tab_sentiment, tab_search = st.tabs([
+tab_home, tab_keyword, tab_topic, tab_trend, tab_network, tab_source, tab_sentiment, tab_search = st.tabs([
     "Home",
     "Keyword",
+    "Topic Modeling",
     "Trend",
     "Network",
     "Source",
@@ -672,6 +760,46 @@ with tab_keyword:
 
     section(f"'{selected_kw}'와 유사한 기사", "TF-IDF 벡터 간 코사인 유사도 기반입니다.")
     st.dataframe(similar_articles(df, selected_kw), use_container_width=True)
+
+with tab_topic:
+    section("LDA Topic Modeling", "Coherence Score(c_v)를 기준으로 적정 토픽 수 k를 선택합니다.")
+
+    lda_base = latest_df if len(latest_df) >= 30 else df
+    tokenized_docs = tokenize_for_lda(lda_base, max_docs=600)
+
+    st.info(
+        "본 대시보드는 k=2~10 범위의 LDA 모델을 비교하고, 토픽 단어의 의미적 일관성을 나타내는 Coherence Score(c_v)를 기준으로 추천 k를 산출합니다. "
+        "단, 최종 토픽 수는 점수뿐 아니라 토픽별 상위 단어의 해석 가능성도 함께 검토합니다."
+    )
+
+    coherence_df, best_model, dictionary, lda_topics = compute_lda_coherence(tokenized_docs, start=2, limit=10)
+
+    if coherence_df.empty:
+        st.warning("LDA 토픽모델링을 수행하기에 유효한 토큰 수가 부족합니다. 수집 기간 또는 기사 수를 늘리면 결과가 안정화됩니다.")
+    else:
+        best_row = coherence_df.loc[coherence_df["coherence"].idxmax()]
+        best_k = int(best_row["k"])
+        best_score = float(best_row["coherence"])
+
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            card("Recommended k", str(best_k), "Coherence Score 기준")
+        with c2:
+            card("Best c_v Score", f"{best_score:.4f}", "토픽 의미 일관성 지표")
+        with c3:
+            card("Analyzed Documents", f"{len(tokenized_docs):,}", "LDA 토큰화 기준 문서 수")
+
+        progress_list(coherence_df, "k", "coherence", "k별 Coherence Score(c_v)", top_n=len(coherence_df), suffix="")
+        st.dataframe(coherence_df, use_container_width=True)
+
+        section("Recommended Topic Words", "추천 k에서 도출된 토픽별 상위 단어입니다.")
+        topic_word_df = pd.DataFrame(lda_topics)
+        st.dataframe(topic_word_df, use_container_width=True)
+
+        st.success(
+            f"현재 데이터 기준 추천 토픽 수는 k={best_k}입니다. "
+            f"이는 k=2~10 후보 중 Coherence Score(c_v)가 가장 높은 값입니다."
+        )
 
 with tab_trend:
     section("일별 주요 IT 키워드", "날짜별 TOP 키워드 변화로 이슈 흐름을 확인합니다.")
