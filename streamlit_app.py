@@ -572,6 +572,12 @@ MENU_ICON = {
     "Search": "Q"
 }
 
+GROUP_DESC = {
+    "텍스트 분석": "키워드 · 시계열 · 네트워크 분석",
+    "비교 분석": "소스별 경향과 감성/리스크 비교",
+    "데이터 탐색": "전체 기사 검색과 원본 데이터 확인"
+}
+
 if "menu" not in st.session_state:
     st.session_state["menu"] = "Home"
 if "open_group" not in st.session_state:
@@ -725,6 +731,7 @@ for group_name, group_data in MENU_TREE.items():
 
     # 열린 상위 메뉴는 '오늘의 뉴스'와 같은 강조 카드로 표시
     if is_open:
+        group_desc = GROUP_DESC.get(group_name, "")
         st.sidebar.markdown(
             f"""
             <div class="sidebar-single-current">
@@ -732,6 +739,7 @@ for group_name, group_data in MENU_TREE.items():
                     <span class="sidebar-icon">{group_icon}</span>
                     <span>{group_name}</span>
                 </div>
+                <div class="sidebar-desc">{group_desc}</div>
             </div>
             """,
             unsafe_allow_html=True,
