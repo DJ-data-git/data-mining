@@ -965,17 +965,6 @@ with tab_home:
     with c4:
         card("오늘 리스크 이슈", "보안 / 개인정보", f"{risk_today_count:,}건 탐지", "#ef4444")
 
-    if DYNAMIC_KEYWORDS:
-        section("Emerging IT Keywords", "최신 뉴스 데이터에서 자동 추출된 동적 키워드입니다.")
-        dynamic_df = keyword_counts(latest_df, DYNAMIC_KEYWORDS).head(10)
-        keyword_chip_grid(dynamic_df, "keyword", "count", None, clickable=True, session_key="dynamic_drill_keyword")
-
-        if "dynamic_drill_keyword" in st.session_state and st.session_state["dynamic_drill_keyword"]:
-            dynamic_kw = st.session_state["dynamic_drill_keyword"]
-            dynamic_news = filter_keyword(df, dynamic_kw)
-            st.markdown("### 선택 Emerging Keyword 관련 뉴스")
-            st.info(f"선택된 키워드: {dynamic_kw} / 관련 기사 수: {len(dynamic_news):,}건")
-            article_table(dynamic_news, DATE_COL)
 
     section("Today’s Top 10 IT Keywords")
     keyword_chip_grid(top_keywords, "keyword", "count", None, clickable=True, session_key="home_drill_keyword")
