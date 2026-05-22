@@ -186,8 +186,14 @@ def keyword_chip_grid(df, label_col="keyword", value_col="count", title=None, to
                 """, unsafe_allow_html=True)
 
                 if clickable:
-                    if st.button("뉴스 보기", key=f"{session_key}_{idx}_{label}"):
-                        st.session_state[session_key] = label
+                    current_selected = st.session_state.get(session_key, "")
+                    button_label = "뉴스 닫기" if current_selected == label else "뉴스 보기"
+
+                    if st.button(button_label, key=f"{session_key}_{idx}_{label}"):
+                        if st.session_state.get(session_key, "") == label:
+                            st.session_state[session_key] = ""
+                        else:
+                            st.session_state[session_key] = label
 
 
 def methodology_cards():
