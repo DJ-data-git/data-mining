@@ -137,16 +137,52 @@ def progress_list(df, label_col, value_col, title=None, top_n=10, suffix="건"):
         value_text = f"{int(value):,}{suffix}" if value == int(value) else f"{value:.2f}"
         st.markdown(f"""
         <div style="background:rgba(15,23,42,.75);border:1px solid rgba(148,163,184,.12);border-radius:18px;
-        padding:18px 22px;margin-bottom:14px;box-shadow:0 0 18px rgba(56,189,248,.05);">
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
-            <div style="font-size:20px;font-weight:900;color:white;">#{idx+1} {label}</div>
-            <div style="font-size:19px;font-weight:900;color:{color};">{value_text}</div>
+        padding:14px 18px;margin-bottom:10px;box-shadow:0 0 14px rgba(56,189,248,.04);">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+            <div style="font-size:17px;font-weight:850;color:white;">{label}</div>
+            <div style="font-size:16px;font-weight:850;color:{color};">{value_text}</div>
           </div>
-          <div style="width:100%;height:14px;background:#1e293b;border-radius:999px;overflow:hidden;">
-            <div style="width:{ratio}%;height:100%;background:linear-gradient(90deg,{color},#38bdf8);border-radius:999px;box-shadow:0 0 14px {color};"></div>
+          <div style="width:100%;height:9px;background:#1e293b;border-radius:999px;overflow:hidden;">
+            <div style="width:{ratio}%;height:100%;background:linear-gradient(90deg,{color},#38bdf8);border-radius:999px;"></div>
           </div>
         </div>
         """, unsafe_allow_html=True)
+
+
+def keyword_chip_grid(df, label_col="keyword", value_col="count", title=None, top_n=10, suffix="건"):
+    if title:
+        st.markdown(f"### {title}")
+    if df.empty or label_col not in df.columns or value_col not in df.columns:
+        st.warning("표시할 데이터가 없습니다.")
+        return
+
+    view = df.head(top_n).copy()
+    max_v = view[value_col].max()
+    colors = ["#38bdf8", "#60a5fa", "#818cf8", "#22c55e", "#14b8a6", "#eab308", "#f97316", "#ef4444", "#ec4899", "#a855f7"]
+
+    for start in range(0, len(view), 5):
+        cols = st.columns(5)
+        for col, (_, row) in zip(cols, view.iloc[start:start+5].iterrows()):
+            label = row[label_col]
+            value = float(row[value_col])
+            ratio = value / max_v * 100 if max_v else 0
+            color = colors[(start + list(view.iloc[start:start+5].index).index(row.name)) % len(colors)]
+            value_text = f"{int(value):,}{suffix}" if value == int(value) else f"{value:.2f}"
+            with col:
+                st.markdown(f"""
+                <div style="background:rgba(15,23,42,.82);border:1px solid rgba(56,189,248,.22);border-radius:18px;
+                padding:16px 14px;margin-bottom:14px;min-height:112px;box-shadow:0 0 16px rgba(56,189,248,.05);">
+                    <div style="font-size:18px;font-weight:900;color:#e5e7eb;margin-bottom:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+                        {label}
+                    </div>
+                    <div style="font-size:24px;font-weight:950;color:{color};margin-bottom:10px;">
+                        {value_text}
+                    </div>
+                    <div style="width:100%;height:7px;background:#1e293b;border-radius:999px;overflow:hidden;">
+                        <div style="width:{ratio}%;height:100%;background:linear-gradient(90deg,{color},#38bdf8);border-radius:999px;"></div>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
 
 
 def methodology_cards():
@@ -571,7 +607,7 @@ if menu == "Home":
     methodology_cards()
 
     section("오늘의 주요 IT 키워드 트렌드")
-    progress_list(top_keywords, "keyword", "count", "오늘의 주요 IT 키워드 TOP 10")
+    keyword_chip_grid(top_keywords, "keyword", "count", "오늘의 주요 IT 키워드 TOP 10")
 
     section(f"{latest_date} 주요 이슈 자동 요약")
     cols = st.columns(3)
