@@ -70,7 +70,7 @@ section[data-testid="stSidebar"] {background:#020617;}
 """, unsafe_allow_html=True)
 
 st.title("IT News Insight Center")
-
+`
 # =========================================================
 # Config
 # =========================================================
@@ -786,7 +786,7 @@ def network_html(net_df, top_n=25):
         "smooth": {"enabled": true, "type": "dynamic"}
       },
       "physics": {
-        "enabled": false,
+        "enabled": ture,
         "barnesHut": {
           "gravitationalConstant": -52000,
           "centralGravity": 0.18,
