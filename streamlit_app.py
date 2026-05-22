@@ -149,29 +149,30 @@ def progress_list(df, label_col, value_col, title=None, top_n=10, suffix="건"):
         """, unsafe_allow_html=True)
 
 
-def keyword_chip_grid(df, label_col="keyword", value_col="count", title=None, top_n=10, suffix="건"):
+def keyword_chip_grid(df, label_col="keyword", value_col="count", title=None, top_n=10, suffix="건", clickable=False, session_key="drill_keyword"):
     if title:
         st.markdown(f"### {title}")
     if df.empty or label_col not in df.columns or value_col not in df.columns:
         st.warning("표시할 데이터가 없습니다.")
         return
 
-    view = df.head(top_n).copy()
+    view = df.head(top_n).copy().reset_index(drop=True)
     max_v = view[value_col].max()
     colors = ["#38bdf8", "#60a5fa", "#818cf8", "#22c55e", "#14b8a6", "#eab308", "#f97316", "#ef4444", "#ec4899", "#a855f7"]
 
     for start in range(0, len(view), 5):
         cols = st.columns(5)
-        for col, (_, row) in zip(cols, view.iloc[start:start+5].iterrows()):
-            label = row[label_col]
+        for offset, (col, (_, row)) in enumerate(zip(cols, view.iloc[start:start+5].iterrows())):
+            idx = start + offset
+            label = str(row[label_col])
             value = float(row[value_col])
             ratio = value / max_v * 100 if max_v else 0
-            color = colors[(start + list(view.iloc[start:start+5].index).index(row.name)) % len(colors)]
+            color = colors[idx % len(colors)]
             value_text = f"{int(value):,}{suffix}" if value == int(value) else f"{value:.2f}"
             with col:
                 st.markdown(f"""
                 <div style="background:rgba(15,23,42,.82);border:1px solid rgba(56,189,248,.22);border-radius:18px;
-                padding:16px 14px;margin-bottom:14px;min-height:112px;box-shadow:0 0 16px rgba(56,189,248,.05);">
+                padding:16px 14px;margin-bottom:8px;min-height:112px;box-shadow:0 0 16px rgba(56,189,248,.05);">
                     <div style="font-size:18px;font-weight:900;color:#e5e7eb;margin-bottom:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
                         {label}
                     </div>
@@ -183,6 +184,10 @@ def keyword_chip_grid(df, label_col="keyword", value_col="count", title=None, to
                     </div>
                 </div>
                 """, unsafe_allow_html=True)
+
+                if clickable:
+                    if st.button("뉴스 보기", key=f"{session_key}_{idx}_{label}"):
+                        st.session_state[session_key] = label
 
 
 def methodology_cards():
@@ -607,7 +612,14 @@ if menu == "Home":
     methodology_cards()
 
     section("오늘의 주요 IT 키워드 트렌드")
-    keyword_chip_grid(top_keywords, "keyword", "count", "오늘의 주요 IT 키워드 TOP 10")
+    keyword_chip_grid(top_keywords, "keyword", "count", "오늘의 주요 IT 키워드 TOP 10", clickable=True, session_key="home_drill_keyword")
+
+    if "home_drill_keyword" in st.session_state and st.session_state["home_drill_keyword"]:
+        drill_kw = st.session_state["home_drill_keyword"]
+        drill_df = filter_keyword(df, drill_kw)
+        st.markdown("### 선택 키워드 관련 뉴스")
+        st.info(f"선택된 키워드: {drill_kw} / 관련 기사 수: {len(drill_df):,}건")
+        article_table(drill_df, DATE_COL)
 
     section(f"{latest_date} 주요 이슈 자동 요약")
     cols = st.columns(3)
