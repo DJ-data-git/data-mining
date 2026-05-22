@@ -786,7 +786,7 @@ def network_html(net_df, top_n=25):
         "smooth": {"enabled": true, "type": "dynamic"}
       },
       "physics": {
-        "enabled": true,
+        "enabled": false,
         "barnesHut": {
           "gravitationalConstant": -52000,
           "centralGravity": 0.18,
