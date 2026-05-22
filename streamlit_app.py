@@ -168,7 +168,10 @@ def fetch_s3_data(bucket, prefix):
         dfs.append(tmp)
         
     df = pd.concat(dfs, ignore_index=True) if dfs else pd.DataFrame()
-    return prepare_df(df), len(keys), keys
+    
+    # ✅ 수정 완료: 튜플에서 데이터프레임만 분리하여 반환합니다.
+    prepared_df, date_col = prepare_df(df)
+    return prepared_df, len(keys), keys
 
 def prepare_df(df):
     if df.empty: return df, "analysis_date"
@@ -182,14 +185,14 @@ def prepare_df(df):
     df["source_group"] = df.get("source_group", df["analysis_source"]).fillna("").astype(str)
     df.loc[df["source_group"].str.strip() == "", "source_group"] = df["analysis_source"]
     
-    # 💡 텍스트 합치기 최적화 (이후 연산에서 text_series() 대신 사용)
+    # 💡 텍스트 합치기 최적화 
     df["combined_text"] = df.get("title", "").fillna("").astype(str) + " " + df.get("description", "").fillna("").astype(str)
     
     dedup_cols = [c for c in ["originallink", "link", "title"] if c in df.columns]
     if dedup_cols:
         df = df.drop_duplicates(subset=dedup_cols, keep="last")
 
-    # 💡 감성 분석 카운트 방식 최적화 (존재 유무 -> 실제 빈도수 기반)
+    # 💡 감성 분석 카운트 방식 최적화
     pos_words = ["성장", "확대", "출시", "투자", "협력", "개선", "강화", "수주", "증가", "성공", "최초", "고도화", "혁신"]
     neg_words = ["해킹", "침해", "유출", "장애", "중단", "규제", "감소", "적자", "위험", "논란", "피해", "취약점", "공격"]
     
@@ -371,7 +374,7 @@ if raw_df.empty:
     st.stop()
 DATE_COL = "analysis_date"
 
-# 💡 사이드바 UI 추가 (선택 사항이었으나 UX 개선을 위해 유지)
+# 💡 사이드바 UI 
 with st.sidebar:
     st.header("⚙️ 분석 필터")
     min_date = pd.to_datetime(raw_df[DATE_COL].min())
