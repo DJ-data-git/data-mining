@@ -8,3 +8,6 @@ pyvis
 beautifulsoup4
 requests
 konlpy
+gensim
+pyLDAvis
+konlpy
