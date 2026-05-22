@@ -721,13 +721,25 @@ for group_name, group_data in MENU_TREE.items():
 
     children = group_data["children"]
     is_open = st.session_state.get("open_group") == group_name or st.session_state.get("menu") in children
-    arrow = "▾" if is_open else "▸"
-
-    # 상위 메뉴 자체를 클릭하면 열고 닫히도록 처리
     group_icon = MENU_ICON.get(group_name, "•")
-    if st.sidebar.button(f"{arrow}   {group_icon}   {group_name}", key=f"toggle_{group_name}"):
-        st.session_state["open_group"] = "" if is_open else group_name
-        st.rerun()
+
+    # 열린 상위 메뉴는 '오늘의 뉴스'와 같은 강조 카드로 표시
+    if is_open:
+        st.sidebar.markdown(
+            f"""
+            <div class="sidebar-single-current">
+                <div class="sidebar-row-title">
+                    <span class="sidebar-icon">{group_icon}</span>
+                    <span>{group_name}</span>
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+    else:
+        if st.sidebar.button(f"{group_icon}   {group_name}", key=f"toggle_{group_name}"):
+            st.session_state["open_group"] = group_name
+            st.rerun()
 
     if is_open:
         st.sidebar.markdown('<div class="child-wrap">', unsafe_allow_html=True)
