@@ -508,7 +508,7 @@ topic_ts_df = topic_timeseries(df, DATE_COL)
 # =========================================================
 
 # =========================================================
-# Tree Sidebar Menu
+# Premium Sidebar Menu
 # =========================================================
 
 MENU_TREE = {
@@ -539,64 +539,162 @@ MENU_LABELS = {
     "Search": "기사 검색",
 }
 
+MENU_DESC = {
+    "Home": "오늘의 핵심 뉴스와 키워드",
+    "Keyword": "TF-IDF · 유사 기사 · 관련 기사",
+    "Trend": "날짜별 키워드와 주제 변화",
+    "Network": "키워드 동시출현 관계",
+    "Source": "수집 소스별 보도 경향",
+    "Sentiment": "긍정/리스크 보도 성향",
+    "Search": "전체 기사 검색"
+}
+
+MENU_ICON = {
+    "Home": "⌂",
+    "Keyword": "K",
+    "Trend": "T",
+    "Network": "N",
+    "Source": "S",
+    "Sentiment": "R",
+    "Search": "Q"
+}
+
 if "menu" not in st.session_state:
     st.session_state["menu"] = "Home"
 
-st.sidebar.markdown("### IT News Dashboard")
-st.sidebar.caption("분석 메뉴")
-
 st.sidebar.markdown("""
 <style>
-section[data-testid="stSidebar"] button {
-    width: 100%;
-    border-radius: 12px !important;
-    border: 1px solid rgba(56,189,248,.18) !important;
-    background: rgba(15,23,42,.72) !important;
-    color: #e5e7eb !important;
-    text-align: left !important;
-    padding: 0.55rem 0.75rem !important;
-    margin-bottom: 0.25rem !important;
-    box-shadow: none !important;
+section[data-testid="stSidebar"] {
+    background: linear-gradient(180deg, #020617 0%, #030712 55%, #020617 100%);
 }
-section[data-testid="stSidebar"] button:hover {
-    background: linear-gradient(135deg, rgba(2,132,199,.9), rgba(37,99,235,.9)) !important;
-    border: 1px solid rgba(56,189,248,.75) !important;
+.sidebar-brand {
+    padding: 1.1rem 0 1.2rem 0;
+    margin-bottom: 0.5rem;
+    border-bottom: 1px solid rgba(148,163,184,.14);
+}
+.sidebar-brand-title {
+    font-size: 18px;
+    font-weight: 950;
+    color: #f8fafc;
+    letter-spacing: -0.03em;
+}
+.sidebar-brand-sub {
+    margin-top: 6px;
+    color: #64748b;
+    font-size: 12px;
+    line-height: 1.5;
+}
+.sidebar-group-title {
+    color: #64748b;
+    font-size: 11px;
+    font-weight: 900;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    margin: 18px 0 8px 2px;
 }
 .sidebar-current {
-    background: linear-gradient(135deg, #0284c7, #2563eb);
-    color: white;
-    border-radius: 12px;
-    padding: 0.58rem 0.78rem;
-    font-weight: 900;
-    margin-bottom: 0.3rem;
-    border: 1px solid rgba(56,189,248,.8);
+    position: relative;
+    background: linear-gradient(135deg, rgba(14,165,233,.26), rgba(37,99,235,.18));
+    border: 1px solid rgba(56,189,248,.55);
+    color: #f8fafc;
+    border-radius: 16px;
+    padding: 0.82rem 0.82rem;
+    margin-bottom: 0.45rem;
+    box-shadow: 0 0 24px rgba(56,189,248,.10), inset 0 1px 0 rgba(255,255,255,.05);
+}
+.sidebar-current:before {
+    content: "";
+    position: absolute;
+    left: -1px;
+    top: 18%;
+    width: 4px;
+    height: 64%;
+    border-radius: 999px;
+    background: #38bdf8;
+}
+.sidebar-row-title {
+    display: flex;
+    align-items: center;
+    gap: 10px;
     font-size: 14px;
+    font-weight: 900;
 }
-.sidebar-child {
-    padding-left: 0.55rem;
+.sidebar-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    border-radius: 9px;
+    background: rgba(56,189,248,.13);
+    color: #7dd3fc;
+    font-size: 12px;
+    font-weight: 950;
 }
-.sidebar-sub {
+.sidebar-desc {
+    margin-left: 34px;
+    margin-top: 5px;
     color: #94a3b8;
-    font-size: 13px;
-    margin-bottom: 10px;
+    font-size: 11px;
+    line-height: 1.4;
+}
+section[data-testid="stSidebar"] button {
+    width: 100%;
+    border-radius: 16px !important;
+    border: 1px solid rgba(148,163,184,.16) !important;
+    background: rgba(15,23,42,.52) !important;
+    color: #e5e7eb !important;
+    text-align: left !important;
+    padding: 0.68rem 0.78rem !important;
+    margin-bottom: 0.42rem !important;
+    box-shadow: none !important;
+    transition: all .15s ease !important;
+}
+section[data-testid="stSidebar"] button:hover {
+    transform: translateX(2px);
+    background: rgba(30,41,59,.92) !important;
+    border: 1px solid rgba(56,189,248,.65) !important;
+    box-shadow: 0 0 18px rgba(56,189,248,.08) !important;
 }
 </style>
 """, unsafe_allow_html=True)
 
+st.sidebar.markdown(
+    """
+    <div class="sidebar-brand">
+        <div class="sidebar-brand-title">IT News Dashboard</div>
+        <div class="sidebar-brand-sub">뉴스 데이터 기반 트렌드 인텔리전스</div>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
+
 for group_name, children in MENU_TREE.items():
-    expanded = st.session_state["menu"] in children.keys()
-    with st.sidebar.expander(group_name, expanded=expanded):
-        for key, label in children.items():
-            if st.session_state["menu"] == key:
-                st.markdown(f'<div class="sidebar-current">{label}</div>', unsafe_allow_html=True)
-            else:
-                if st.button(label, key=f"menu_{key}"):
-                    st.session_state["menu"] = key
-                    st.rerun()
+    st.sidebar.markdown(f'<div class="sidebar-group-title">{group_name}</div>', unsafe_allow_html=True)
+
+    for key, label in children.items():
+        icon = MENU_ICON.get(key, "•")
+        desc = MENU_DESC.get(key, "")
+
+        if st.session_state["menu"] == key:
+            st.sidebar.markdown(
+                f"""
+                <div class="sidebar-current">
+                    <div class="sidebar-row-title">
+                        <span class="sidebar-icon">{icon}</span>
+                        <span>{label}</span>
+                    </div>
+                    <div class="sidebar-desc">{desc}</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+        else:
+            if st.sidebar.button(f"{icon}   {label}", key=f"menu_{key}"):
+                st.session_state["menu"] = key
+                st.rerun()
 
 menu = st.session_state["menu"]
-
-
 
 # =========================================================
 # Pages
