@@ -730,21 +730,119 @@ def event_annotations(df, date_col):
 
 def network_html(net_df, top_n=25):
     G = nx.Graph()
+
     for _, row in net_df.head(top_n).iterrows():
-        G.add_edge(row["keyword_a"], row["keyword_b"], value=int(row["co_count"]), title=f"동시출현: {int(row['co_count'])}")
-    net = Network(height="720px", width="100%", bgcolor="#0f172a", font_color="white")
+        weight = int(row["co_count"])
+        G.add_edge(
+            row["keyword_a"],
+            row["keyword_b"],
+            value=max(1, weight / 80),
+            width=max(1, min(10, weight / 120)),
+            title=f"{row['keyword_a']} ↔ {row['keyword_b']} | 동시출현 {weight:,}건"
+        )
+
+    net = Network(
+        height="720px",
+        width="100%",
+        bgcolor="#0f172a",
+        font_color="white",
+        notebook=False
+    )
     net.from_nx(G)
+
     degrees = dict(G.degree())
+    weighted_degree = dict(G.degree(weight="value"))
+
     for node in net.nodes:
-        node["size"] = 18 + degrees.get(node["id"], 1) * 5
-        node["color"] = "#38bdf8"
+        node_id = node["id"]
+        size = 20 + weighted_degree.get(node_id, 1) * 1.8
+        node["size"] = min(76, max(24, size))
+        node["color"] = {
+            "background": "#38bdf8",
+            "border": "#7dd3fc",
+            "highlight": {"background": "#60a5fa", "border": "#e0f2fe"}
+        }
+        node["borderWidth"] = 2
+        node["title"] = f"{node_id}<br>연결 키워드 수: {degrees.get(node_id, 0)}<br>연결 강도: {weighted_degree.get(node_id, 0):.1f}"
+        node["font"] = {"size": 18, "face": "Arial", "color": "#f8fafc", "strokeWidth": 3, "strokeColor": "#0f172a"}
+
     for edge in net.edges:
-        edge["color"] = "#64748b"
-        edge["smooth"] = True
+        edge["color"] = {"color": "rgba(148,163,184,.72)", "highlight": "#38bdf8"}
+        edge["smooth"] = {"type": "dynamic"}
+
+    net.set_options("""
+    var options = {
+      "interaction": {
+        "hover": true,
+        "tooltipDelay": 120,
+        "hideEdgesOnDrag": false
+      },
+      "nodes": {
+        "shape": "dot",
+        "scaling": {"min": 20, "max": 80}
+      },
+      "edges": {
+        "scaling": {"min": 1, "max": 10},
+        "smooth": {"enabled": true, "type": "dynamic"}
+      },
+      "physics": {
+        "enabled": true,
+        "barnesHut": {
+          "gravitationalConstant": -52000,
+          "centralGravity": 0.18,
+          "springLength": 185,
+          "springConstant": 0.035,
+          "damping": 0.18,
+          "avoidOverlap": 0.65
+        },
+        "stabilization": {"iterations": 220}
+      }
+    }
+    """)
+
     path = tempfile.NamedTemporaryFile(delete=False, suffix=".html").name
     net.save_graph(path)
     with open(path, "r", encoding="utf-8") as f:
         return f.read()
+
+
+def render_strong_connections(net_df, top_n=6):
+    if net_df.empty:
+        st.warning("표시할 키워드 연결 데이터가 없습니다.")
+        return
+
+    st.markdown("### Strongest Keyword Connections")
+    st.caption("같은 기사 안에서 가장 자주 함께 등장한 키워드 조합입니다.")
+
+    view = net_df.head(top_n).reset_index(drop=True)
+    cols = st.columns(3)
+
+    for idx, (_, row) in enumerate(view.iterrows()):
+        with cols[idx % 3]:
+            pair = f"{row['keyword_a']} ↔ {row['keyword_b']}"
+            card(
+                pair,
+                f"{int(row['co_count']):,}건",
+                "동시출현 빈도 기준 핵심 연결",
+                "#38bdf8"
+            )
+
+
+def render_network_summary(net_df):
+    if net_df.empty:
+        return
+
+    top_pair = net_df.iloc[0]
+    unique_nodes = len(set(net_df["keyword_a"]).union(set(net_df["keyword_b"])))
+    total_links = len(net_df)
+
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        card("가장 강한 연결", f"{top_pair['keyword_a']} ↔ {top_pair['keyword_b']}", f"{int(top_pair['co_count']):,}건 동시출현")
+    with c2:
+        card("연결 키워드 수", f"{unique_nodes:,}", "네트워크에 포함된 고유 키워드")
+    with c3:
+        card("키워드 연결 수", f"{total_links:,}", "분석된 키워드 페어 수")
 
 
 def article_table(df, date_col="analysis_date"):
@@ -974,14 +1072,16 @@ with tab_trend:
     st.dataframe(event_annotations(df, DATE_COL), use_container_width=True)
 
 with tab_network:
-    section("키워드 동시출현 네트워크 분석")
-    st.dataframe(net_df.head(30), use_container_width=True)
+    section("IT Keyword Intelligence Network", "키워드가 함께 등장하는 구조를 네트워크 맵으로 시각화합니다.")
 
-    section("키워드 네트워크 그래프 시각화")
+    render_network_summary(net_df)
+
     if not net_df.empty:
         components.html(network_html(net_df), height=760, scrolling=True)
     else:
         st.warning("네트워크 그래프를 생성할 수 있는 데이터가 없습니다.")
+
+    render_strong_connections(net_df, top_n=6)
 
 with tab_source:
     section("뉴스 수집 소스 기준 분석")
