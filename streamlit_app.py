@@ -507,29 +507,40 @@ topic_ts_df = topic_timeseries(df, DATE_COL)
 # =========================================================
 
 # =========================================================
-# Premium Sidebar Menu
+# Accordion Sidebar Menu
 # =========================================================
 
 MENU_TREE = {
-    "오늘의 뉴스": {
-        "Home": "뉴스 요약"
+    "Home": {
+        "type": "single",
+        "label": "오늘의 뉴스",
+        "desc": "오늘의 핵심 뉴스와 키워드"
     },
     "텍스트 분석": {
-        "Keyword": "키워드 분석",
-        "Trend": "시계열 분석",
-        "Network": "네트워크 분석"
+        "type": "group",
+        "children": {
+            "Keyword": "키워드 분석",
+            "Trend": "시계열 분석",
+            "Network": "네트워크 분석"
+        }
     },
     "비교 분석": {
-        "Source": "소스 분석",
-        "Sentiment": "감성/리스크"
+        "type": "group",
+        "children": {
+            "Source": "소스 분석",
+            "Sentiment": "감성/리스크"
+        }
     },
     "데이터 탐색": {
-        "Search": "기사 검색"
+        "type": "group",
+        "children": {
+            "Search": "기사 검색"
+        }
     }
 }
 
 MENU_LABELS = {
-    "Home": "뉴스 요약",
+    "Home": "오늘의 뉴스",
     "Keyword": "키워드 분석",
     "Trend": "시계열 분석",
     "Network": "네트워크 분석",
@@ -549,7 +560,7 @@ MENU_DESC = {
 }
 
 MENU_ICON = {
-    "Home": "⌂",
+    "Home": "H",
     "Keyword": "K",
     "Trend": "T",
     "Network": "N",
@@ -560,6 +571,8 @@ MENU_ICON = {
 
 if "menu" not in st.session_state:
     st.session_state["menu"] = "Home"
+if "open_group" not in st.session_state:
+    st.session_state["open_group"] = "텍스트 분석"
 
 st.sidebar.markdown("""
 <style>
@@ -568,7 +581,7 @@ section[data-testid="stSidebar"] {
 }
 .sidebar-brand {
     padding: 1.1rem 0 1.2rem 0;
-    margin-bottom: 0.5rem;
+    margin-bottom: 0.8rem;
     border-bottom: 1px solid rgba(148,163,184,.14);
 }
 .sidebar-brand-title {
@@ -583,32 +596,40 @@ section[data-testid="stSidebar"] {
     font-size: 12px;
     line-height: 1.5;
 }
-.sidebar-group-title {
+.sidebar-group-card {
+    background: rgba(15,23,42,.42);
+    border: 1px solid rgba(148,163,184,.13);
+    border-radius: 16px;
+    padding: 0.72rem 0.78rem;
+    margin: 0.48rem 0;
     color: #e5e7eb;
     font-size: 15px;
     font-weight: 950;
-    letter-spacing: -0.02em;
-    margin: 22px 0 10px 2px;
+}
+.sidebar-group-open {
+    background: linear-gradient(135deg, rgba(14,165,233,.18), rgba(37,99,235,.10));
+    border: 1px solid rgba(56,189,248,.45);
+    box-shadow: 0 0 18px rgba(56,189,248,.06);
+}
+.sidebar-single-current {
+    position: relative;
+    background: linear-gradient(135deg, rgba(14,165,233,.26), rgba(37,99,235,.18));
+    border: 1px solid rgba(56,189,248,.58);
+    color: #f8fafc;
+    border-radius: 16px;
+    padding: 0.82rem 0.82rem;
+    margin-bottom: 0.55rem;
+    box-shadow: 0 0 22px rgba(56,189,248,.10), inset 0 1px 0 rgba(255,255,255,.05);
 }
 .sidebar-current {
-    position: relative;
-    background: linear-gradient(135deg, rgba(14,165,233,.22), rgba(37,99,235,.14));
-    border: 1px solid rgba(56,189,248,.52);
+    background: rgba(56,189,248,.14);
+    border: 1px solid rgba(56,189,248,.42);
     color: #f8fafc;
-    border-radius: 15px;
-    padding: 0.68rem 0.76rem;
-    margin-bottom: 0.42rem;
-    box-shadow: 0 0 20px rgba(56,189,248,.08), inset 0 1px 0 rgba(255,255,255,.05);
-}
-.sidebar-current:before {
-    content: "";
-    position: absolute;
-    left: -1px;
-    top: 18%;
-    width: 4px;
-    height: 64%;
-    border-radius: 999px;
-    background: #38bdf8;
+    border-radius: 13px;
+    padding: 0.58rem 0.72rem;
+    margin: 0.32rem 0 0.32rem 0.55rem;
+    font-size: 13px;
+    font-weight: 900;
 }
 .sidebar-row-title {
     display: flex;
@@ -656,6 +677,9 @@ section[data-testid="stSidebar"] button:hover {
     border: 1px solid rgba(56,189,248,.65) !important;
     box-shadow: 0 0 18px rgba(56,189,248,.08) !important;
 }
+.child-wrap {
+    margin: 0.15rem 0 0.7rem 0.2rem;
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -669,30 +693,52 @@ st.sidebar.markdown(
     unsafe_allow_html=True,
 )
 
-for group_name, children in MENU_TREE.items():
-    st.sidebar.markdown(f'<div class="sidebar-group-title">{group_name}</div>', unsafe_allow_html=True)
+# Home은 하위 메뉴 없이 단독 메뉴로 처리
+if st.session_state["menu"] == "Home":
+    st.sidebar.markdown(
+        f"""
+        <div class="sidebar-single-current">
+            <div class="sidebar-row-title">
+                <span class="sidebar-icon">{MENU_ICON['Home']}</span>
+                <span>오늘의 뉴스</span>
+            </div>
+            <div class="sidebar-desc">{MENU_DESC['Home']}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+else:
+    if st.sidebar.button("H   오늘의 뉴스", key="menu_Home"):
+        st.session_state["menu"] = "Home"
+        st.rerun()
 
-    for key, label in children.items():
-        icon = MENU_ICON.get(key, "•")
-        desc = MENU_DESC.get(key, "")
+for group_name, group_data in MENU_TREE.items():
+    if group_data.get("type") != "group":
+        continue
 
-        if st.session_state["menu"] == key:
-            st.sidebar.markdown(
-                f"""
-                <div class="sidebar-current">
-                    <div class="sidebar-row-title">
-                        <span class="sidebar-icon">{icon}</span>
-                        <span>{label}</span>
-                    </div>
-                    <div class="sidebar-desc">{desc}</div>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-        else:
-            if st.sidebar.button(f"{icon}   {label}", key=f"menu_{key}"):
-                st.session_state["menu"] = key
-                st.rerun()
+    children = group_data["children"]
+    is_open = st.session_state.get("open_group") == group_name or st.session_state.get("menu") in children
+    arrow = "▾" if is_open else "▸"
+
+    group_class = "sidebar-group-card sidebar-group-open" if is_open else "sidebar-group-card"
+    st.sidebar.markdown(f'<div class="{group_class}">{arrow} {group_name}</div>', unsafe_allow_html=True)
+
+    if st.sidebar.button(f"열기 / 닫기", key=f"toggle_{group_name}"):
+        st.session_state["open_group"] = "" if is_open else group_name
+        st.rerun()
+
+    if is_open:
+        st.sidebar.markdown('<div class="child-wrap">', unsafe_allow_html=True)
+        for key, label in children.items():
+            icon = MENU_ICON.get(key, "•")
+            if st.session_state["menu"] == key:
+                st.sidebar.markdown(f'<div class="sidebar-current">{icon}  {label}</div>', unsafe_allow_html=True)
+            else:
+                if st.sidebar.button(f"{icon}   {label}", key=f"menu_{key}"):
+                    st.session_state["menu"] = key
+                    st.session_state["open_group"] = group_name
+                    st.rerun()
+        st.sidebar.markdown('</div>', unsafe_allow_html=True)
 
 menu = st.session_state["menu"]
 
