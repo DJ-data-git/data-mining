@@ -958,7 +958,6 @@ with tab_topic:
         )
 
 with tab_trend:
-    section("Trending Keywords Timeline", "날짜별 TOP 키워드를 카드형 타임라인으로 보여주고 전일 대비 변화를 확인합니다.")
     render_daily_keyword_timeline(daily_kw, top_n=5)
 
     section("Keyword Movement Detail", "선택한 키워드가 어느 날짜에 강하게 등장했는지 확인합니다.")
