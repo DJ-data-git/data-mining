@@ -72,9 +72,11 @@ STOPWORDS = [
 def get_okt():
     return Okt()
 
+# ✅ 수정된 부분: 한국어 명사(Noun)뿐만 아니라 영어(Alpha)도 함께 추출합니다.
 def custom_tokenizer(text):
     okt = get_okt()
-    return [word for word in okt.nouns(text) if len(word) > 1]
+    tokens = okt.pos(text, norm=True, stem=True)
+    return [word for word, pos in tokens if pos in ['Noun', 'Alpha'] and len(word) > 1]
 
 # =========================================================
 # UI helpers
@@ -127,7 +129,7 @@ def methodology_cards():
     methods = [
         ("TF-IDF", "흔한 단어보다 특정 기사군에서 상대적으로 중요한 단어에 높은 가중치를 부여합니다."),
         ("Cosine Similarity", "TF-IDF 벡터 간 각도 유사도를 계산해 특정 키워드와 유사한 기사를 찾습니다."),
-        ("Co-occurrence", "같은 기사 안에 함께 등장한 키워드를 분석해 이슈 간 연결 구조를 파악합니다."),
+        ("Co-occurrence", "같은 기사 안에 함께 등장한 키워드를 분석해 이슈 간 연결 구조 파악합니다."),
         ("Sentiment", "성장·투자·혁신 또는 해킹·유출·침해 키워드로 보도 성향을 분류합니다."),
         ("Time-Series", "날짜별 기사량 변화를 추적해 특정 이슈가 언제 집중되었는지 확인합니다."),
     ]
@@ -169,7 +171,7 @@ def fetch_s3_data(bucket, prefix):
         
     df = pd.concat(dfs, ignore_index=True) if dfs else pd.DataFrame()
     
-    # ✅ 수정 완료: 튜플에서 데이터프레임만 분리하여 반환합니다.
+    # 튜플 언패킹 수정 완료
     prepared_df, date_col = prepare_df(df)
     return prepared_df, len(keys), keys
 
@@ -447,7 +449,7 @@ if not source_count.empty:
         article_table(selected_source_df, DATE_COL)
 
 section("3. TF-IDF 기반 핵심 키워드 분석", "불용어를 제거하고 형태소 분석기를 통해 중요한 단어를 추출합니다.")
-with st.spinner("TF-IDF 연산 중..."):
+with st.spinner("TF-IDF 연산 중... (처음 실행 시 시간이 소요될 수 있습니다)"):
     tfidf_df = tfidf_keywords(latest_df["combined_text"].tolist(), 20)
     st.dataframe(tfidf_df, use_container_width=True)
     if not tfidf_df.empty:
