@@ -70,7 +70,7 @@ section[data-testid="stSidebar"] {background:#020617;}
 """, unsafe_allow_html=True)
 
 st.title("IT News Insight Center")
-`
+
 # =========================================================
 # Config
 # =========================================================
@@ -775,7 +775,9 @@ def network_html(net_df, top_n=25):
       "interaction": {
         "hover": true,
         "tooltipDelay": 120,
-        "hideEdgesOnDrag": false
+        "dragNodes": true,
+        "dragView": true,
+        "zoomView": true
       },
       "nodes": {
         "shape": "dot",
@@ -783,19 +785,10 @@ def network_html(net_df, top_n=25):
       },
       "edges": {
         "scaling": {"min": 1, "max": 10},
-        "smooth": {"enabled": true, "type": "dynamic"}
+        "smooth": {"enabled": true, "type": "continuous"}
       },
       "physics": {
-        "enabled": ture,
-        "barnesHut": {
-          "gravitationalConstant": -52000,
-          "centralGravity": 0.18,
-          "springLength": 185,
-          "springConstant": 0.035,
-          "damping": 0.18,
-          "avoidOverlap": 0.65
-        },
-        "stabilization": {"iterations": 220}
+        "enabled": false
       }
     }
     """)
