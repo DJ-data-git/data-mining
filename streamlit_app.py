@@ -608,8 +608,6 @@ if menu == "Home":
     with c3: card("수집 소스 수", f"{df['analysis_source'].nunique():,}", "source 기준")
     with c4: card("수집 파일 수", f"{len(keys):,}", "S3 processed CSV 파일")
 
-    section("분석 방법론", "뉴스 텍스트마이닝 기반의 5가지 분석 방법입니다.")
-    methodology_cards()
 
     section("오늘의 주요 IT 키워드 트렌드")
     keyword_chip_grid(top_keywords, "keyword", "count", "오늘의 주요 IT 키워드 TOP 10", clickable=True, session_key="home_drill_keyword")
