@@ -507,268 +507,25 @@ topic_ts_df = topic_timeseries(df, DATE_COL)
 # =========================================================
 
 # =========================================================
-# Accordion Sidebar Menu
+# Top Tab Menu
 # =========================================================
 
-MENU_TREE = {
-    "Home": {
-        "type": "single",
-        "label": "오늘의 뉴스",
-        "desc": "오늘의 핵심 뉴스와 키워드"
-    },
-    "텍스트 분석": {
-        "type": "group",
-        "children": {
-            "Keyword": "키워드 분석",
-            "Trend": "시계열 분석",
-            "Network": "네트워크 분석"
-        }
-    },
-    "비교 분석": {
-        "type": "group",
-        "children": {
-            "Source": "소스 분석",
-            "Sentiment": "감성/리스크"
-        }
-    },
-    "데이터 탐색": {
-        "type": "group",
-        "children": {
-            "Search": "기사 검색"
-        }
-    }
-}
-
-MENU_LABELS = {
-    "Home": "오늘의 뉴스",
-    "Keyword": "키워드 분석",
-    "Trend": "시계열 분석",
-    "Network": "네트워크 분석",
-    "Source": "소스 분석",
-    "Sentiment": "감성/리스크",
-    "Search": "기사 검색",
-}
-
-MENU_DESC = {
-    "Home": "오늘의 핵심 뉴스와 키워드",
-    "Keyword": "TF-IDF · 유사 기사 · 관련 기사",
-    "Trend": "날짜별 키워드와 주제 변화",
-    "Network": "키워드 동시출현 관계",
-    "Source": "수집 소스별 보도 경향",
-    "Sentiment": "긍정/리스크 보도 성향",
-    "Search": "전체 기사 검색"
-}
-
-MENU_ICON = {
-    "Home": "⌂",
-    "텍스트 분석": "T",
-    "비교 분석": "C",
-    "데이터 탐색": "D",
-    "Keyword": "K",
-    "Trend": "T",
-    "Network": "N",
-    "Source": "S",
-    "Sentiment": "R",
-    "Search": "Q"
-}
-
-GROUP_DESC = {
-    "텍스트 분석": "키워드 · 시계열 · 네트워크 분석",
-    "비교 분석": "소스별 경향과 감성/리스크 비교",
-    "데이터 탐색": "전체 기사 검색과 원본 데이터 확인"
-}
-
-if "menu" not in st.session_state:
-    st.session_state["menu"] = "Home"
-if "open_group" not in st.session_state:
-    st.session_state["open_group"] = "텍스트 분석"
-
-st.sidebar.markdown("""
-<style>
-section[data-testid="stSidebar"] {
-    background: linear-gradient(180deg, #020617 0%, #030712 55%, #020617 100%);
-}
-.sidebar-brand {
-    padding: 1.1rem 0 1.2rem 0;
-    margin-bottom: 0.8rem;
-    border-bottom: 1px solid rgba(148,163,184,.14);
-}
-.sidebar-brand-title {
-    font-size: 18px;
-    font-weight: 950;
-    color: #f8fafc;
-    letter-spacing: -0.03em;
-}
-.sidebar-brand-sub {
-    margin-top: 6px;
-    color: #64748b;
-    font-size: 12px;
-    line-height: 1.5;
-}
-.sidebar-group-card {
-    background: rgba(15,23,42,.42);
-    border: 1px solid rgba(148,163,184,.13);
-    border-radius: 16px;
-    padding: 0.72rem 0.78rem;
-    margin: 0.48rem 0;
-    color: #e5e7eb;
-    font-size: 15px;
-    font-weight: 950;
-}
-.sidebar-group-open {
-    background: linear-gradient(135deg, rgba(14,165,233,.18), rgba(37,99,235,.10));
-    border: 1px solid rgba(56,189,248,.45);
-    box-shadow: 0 0 18px rgba(56,189,248,.06);
-}
-.sidebar-single-current {
-    position: relative;
-    background: linear-gradient(135deg, rgba(14,165,233,.26), rgba(37,99,235,.18));
-    border: 1px solid rgba(56,189,248,.58);
-    color: #f8fafc;
-    border-radius: 16px;
-    padding: 0.82rem 0.82rem;
-    margin-bottom: 0.55rem;
-    box-shadow: 0 0 22px rgba(56,189,248,.10), inset 0 1px 0 rgba(255,255,255,.05);
-}
-.sidebar-current {
-    background: rgba(56,189,248,.14);
-    border: 1px solid rgba(56,189,248,.42);
-    color: #f8fafc;
-    border-radius: 13px;
-    padding: 0.58rem 0.72rem;
-    margin: 0.32rem 0 0.32rem 0.55rem;
-    font-size: 13px;
-    font-weight: 900;
-}
-.sidebar-row-title {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    font-size: 14px;
-    font-weight: 850;
-}
-.sidebar-icon {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 24px;
-    height: 24px;
-    border-radius: 9px;
-    background: rgba(56,189,248,.13);
-    color: #7dd3fc;
-    font-size: 12px;
-    font-weight: 950;
-}
-.sidebar-desc {
-    margin-left: 34px;
-    margin-top: 5px;
-    color: #94a3b8;
-    font-size: 11px;
-    line-height: 1.4;
-}
-section[data-testid="stSidebar"] button {
-    width: 100%;
-    border-radius: 14px !important;
-    border: 1px solid rgba(148,163,184,.14) !important;
-    background: rgba(15,23,42,.48) !important;
-    color: #cbd5e1 !important;
-    text-align: left !important;
-    padding: 0.56rem 0.72rem !important;
-    margin-bottom: 0.38rem !important;
-    box-shadow: none !important;
-    transition: all .15s ease !important;
-    font-size: 13px !important;
-    font-weight: 700 !important;
-}
-section[data-testid="stSidebar"] button:hover {
-    transform: translateX(2px);
-    background: rgba(30,41,59,.92) !important;
-    border: 1px solid rgba(56,189,248,.65) !important;
-    box-shadow: 0 0 18px rgba(56,189,248,.08) !important;
-}
-.child-wrap {
-    margin: 0.15rem 0 0.7rem 0.2rem;
-}
-</style>
-""", unsafe_allow_html=True)
-
-st.sidebar.markdown(
-    """
-    <div class="sidebar-brand">
-        <div class="sidebar-brand-title">IT News Dashboard</div>
-        <div class="sidebar-brand-sub">뉴스 데이터 기반 트렌드 인텔리전스</div>
-    </div>
-    """,
-    unsafe_allow_html=True,
-)
-
-# Home은 하위 메뉴 없이 단독 메뉴로 처리
-if st.session_state["menu"] == "Home":
-    st.sidebar.markdown(
-        f"""
-        <div class="sidebar-single-current">
-            <div class="sidebar-row-title">
-                <span class="sidebar-icon">{MENU_ICON['Home']}</span>
-                <span>오늘의 뉴스</span>
-            </div>
-            <div class="sidebar-desc">{MENU_DESC['Home']}</div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-else:
-    if st.sidebar.button("H   오늘의 뉴스", key="menu_Home"):
-        st.session_state["menu"] = "Home"
-        st.rerun()
-
-for group_name, group_data in MENU_TREE.items():
-    if group_data.get("type") != "group":
-        continue
-
-    children = group_data["children"]
-    is_open = st.session_state.get("open_group") == group_name or st.session_state.get("menu") in children
-    group_icon = MENU_ICON.get(group_name, "•")
-
-    # 열린 상위 메뉴는 '오늘의 뉴스'와 같은 강조 카드로 표시
-    if is_open:
-        group_desc = GROUP_DESC.get(group_name, "")
-        st.sidebar.markdown(
-            f"""
-            <div class="sidebar-single-current">
-                <div class="sidebar-row-title">
-                    <span class="sidebar-icon">{group_icon}</span>
-                    <span>{group_name}</span>
-                </div>
-                <div class="sidebar-desc">{group_desc}</div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-    else:
-        if st.sidebar.button(f"{group_icon}   {group_name}", key=f"toggle_{group_name}"):
-            st.session_state["open_group"] = group_name
-            st.rerun()
-
-    if is_open:
-        st.sidebar.markdown('<div class="child-wrap">', unsafe_allow_html=True)
-        for key, label in children.items():
-            icon = MENU_ICON.get(key, "•")
-            if st.session_state["menu"] == key:
-                st.sidebar.markdown(f'<div class="sidebar-current">{icon}  {label}</div>', unsafe_allow_html=True)
-            else:
-                if st.sidebar.button(f"{icon}   {label}", key=f"menu_{key}"):
-                    st.session_state["menu"] = key
-                    st.session_state["open_group"] = group_name
-                    st.rerun()
-        st.sidebar.markdown('</div>', unsafe_allow_html=True)
-
-menu = st.session_state["menu"]
+tab_home, tab_keyword, tab_trend, tab_network, tab_source, tab_sentiment, tab_search = st.tabs([
+    "Home",
+    "Keyword",
+    "Trend",
+    "Network",
+    "Source",
+    "Risk",
+    "Search"
+])
 
 # =========================================================
 # Pages
 # =========================================================
 
-if menu == "Home":
+
+with tab_home:
     st.subheader("Today’s IT News Home")
 
     top_kw = top_keywords.iloc[0]["keyword"] if not top_keywords.empty else "-"
@@ -853,7 +610,7 @@ if menu == "Home":
                 item["color"]
             )
 
-elif menu == "Keyword":
+with tab_keyword:
     st.subheader("키워드 분석")
     st.caption("키워드를 선택하면 관련 기사, TF-IDF 중요도, 유사 기사까지 한 번에 확인합니다.")
 
@@ -883,7 +640,7 @@ elif menu == "Keyword":
     section(f"'{selected_kw}'와 유사한 기사", "TF-IDF 벡터 간 코사인 유사도 기반입니다.")
     st.dataframe(similar_articles(df, selected_kw), use_container_width=True)
 
-elif menu == "Trend":
+with tab_trend:
     section("일별 주요 IT 키워드", "날짜별 TOP 키워드 변화로 이슈 흐름을 확인합니다.")
     st.dataframe(daily_kw, use_container_width=True)
     sel_kw = st.selectbox("키워드별 일자 추이 확인", MAIN_KEYWORDS)
@@ -897,7 +654,7 @@ elif menu == "Trend":
     section("이벤트 주석 기반 시계열")
     st.dataframe(event_annotations(df, DATE_COL), use_container_width=True)
 
-elif menu == "Network":
+with tab_network:
     section("키워드 동시출현 네트워크 분석")
     st.dataframe(net_df.head(30), use_container_width=True)
 
@@ -907,7 +664,7 @@ elif menu == "Network":
     else:
         st.warning("네트워크 그래프를 생성할 수 있는 데이터가 없습니다.")
 
-elif menu == "Source":
+with tab_source:
     section("뉴스 수집 소스 기준 분석")
     source_count = df["analysis_source"].value_counts().reset_index()
     source_count.columns = ["source", "count"]
@@ -929,7 +686,7 @@ elif menu == "Source":
     if frame in frame_df.columns:
         progress_list(frame_df[["source", frame]].sort_values(frame, ascending=False), "source", frame, f"{frame} 프레임 TOP 10")
 
-elif menu == "Sentiment":
+with tab_sentiment:
     section("주제별 감성 지수 교차 분석")
     st.dataframe(topic_sent_df, use_container_width=True)
     cols = st.columns(3)
@@ -949,7 +706,7 @@ elif menu == "Sentiment":
     with st.expander("부정/리스크 기사 보기"):
         article_table(df[df["sentiment_group"] == "부정/리스크"], DATE_COL)
 
-elif menu == "Search":
+with tab_search:
     section("전체 기사 검색")
     q = st.text_input("검색어를 입력하세요")
     if q:
