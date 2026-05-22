@@ -460,15 +460,74 @@ topic_ts_df = topic_timeseries(df, DATE_COL)
 # Sidebar Menu
 # =========================================================
 
-menu = st.sidebar.radio(
-    "메뉴",
-    ["Home", "Keyword", "Trend", "Network", "Source", "Sentiment", "Search"],
-)
+# =========================================================
+# Custom Sidebar Menu
+# =========================================================
+
+MENU_ITEMS = {
+    "Home": "오늘의 뉴스",
+    "Keyword": "키워드 분석",
+    "Trend": "시계열 분석",
+    "Network": "네트워크 분석",
+    "Source": "소스 분석",
+    "Sentiment": "감성/리스크",
+    "Search": "기사 검색",
+}
+
+if "menu" not in st.session_state:
+    st.session_state["menu"] = "Home"
+
+st.sidebar.markdown("### IT News Dashboard")
+st.sidebar.caption("분석 메뉴")
+
+st.sidebar.markdown("""
+<style>
+section[data-testid="stSidebar"] button {
+    width: 100%;
+    border-radius: 14px !important;
+    border: 1px solid rgba(56,189,248,.25) !important;
+    background: rgba(15,23,42,.88) !important;
+    color: #e5e7eb !important;
+    text-align: left !important;
+    padding: 0.7rem 0.9rem !important;
+    margin-bottom: 0.35rem !important;
+    box-shadow: none !important;
+}
+section[data-testid="stSidebar"] button:hover {
+    background: linear-gradient(135deg, rgba(2,132,199,.95), rgba(37,99,235,.95)) !important;
+    border: 1px solid rgba(56,189,248,.8) !important;
+}
+.sidebar-current {
+    background: linear-gradient(135deg, #0284c7, #2563eb);
+    color: white;
+    border-radius: 14px;
+    padding: 0.75rem 0.95rem;
+    font-weight: 900;
+    margin-bottom: 0.45rem;
+    border: 1px solid rgba(56,189,248,.8);
+}
+.sidebar-sub {
+    color: #94a3b8;
+    font-size: 13px;
+    margin-bottom: 12px;
+}
+</style>
+""", unsafe_allow_html=True)
+
+for key, label in MENU_ITEMS.items():
+    if st.session_state["menu"] == key:
+        st.sidebar.markdown(f'<div class="sidebar-current">{label}</div>', unsafe_allow_html=True)
+    else:
+        if st.sidebar.button(label, key=f"menu_{key}"):
+            st.session_state["menu"] = key
+            st.rerun()
+
+menu = st.session_state["menu"]
 
 st.sidebar.markdown("---")
-st.sidebar.caption("source 기준 분석 / media_domain 누락 대응")
-st.sidebar.write(f"최신일: {latest_date}")
-st.sidebar.write(f"기사 수: {len(df):,}")
+st.sidebar.markdown(f'<div class="sidebar-sub">최신일: <b>{latest_date}</b></div>', unsafe_allow_html=True)
+st.sidebar.markdown(f'<div class="sidebar-sub">분석 기사 수: <b>{len(df):,}</b></div>', unsafe_allow_html=True)
+st.sidebar.markdown(f'<div class="sidebar-sub">기준: <b>source</b></div>', unsafe_allow_html=True)
 
 # =========================================================
 # Pages
@@ -495,21 +554,34 @@ if menu == "Home":
             card(row["topic"], f"{int(row['count']):,}건", row["keywords"])
 
 elif menu == "Keyword":
-    section("TF-IDF 기반 핵심 키워드 분석", "IT 키워드 후보군 안에서 중요도를 계산합니다.")
+    st.subheader("키워드 분석")
+    st.caption("키워드를 선택하면 관련 기사, TF-IDF 중요도, 유사 기사까지 한 번에 확인합니다.")
+
+    keyword_options = top_keywords["keyword"].tolist() if not top_keywords.empty else MAIN_KEYWORDS
+    selected_kw = st.selectbox("분석할 키워드 선택", keyword_options, key="keyword_page_select")
+
+    selected_articles = filter_keyword(df, selected_kw)
+
+    k1, k2, k3 = st.columns(3)
+    with k1:
+        card("선택 키워드", selected_kw, "현재 분석 기준 키워드")
+    with k2:
+        card("관련 기사 수", f"{len(selected_articles):,}건", "전체 기간 기준")
+    with k3:
+        latest_selected = filter_keyword(latest_df, selected_kw)
+        card("오늘 관련 기사", f"{len(latest_selected):,}건", f"{latest_date} 기준")
+
+    section("TF-IDF 기반 주요 IT 키워드", "IT 키워드 후보군 안에서 중요도를 계산합니다.")
     tfidf_df = tfidf_keywords(latest_df, 20)
     st.dataframe(tfidf_df, use_container_width=True)
     if not tfidf_df.empty:
         progress_list(tfidf_df.head(10), "keyword", "article_count", "TF-IDF 기반 주요 IT 키워드 TOP 10")
 
-    section("Cosine Similarity 기반 유사 기사 분석")
-    sim_kw = st.selectbox("유사 기사 분석 키워드 선택", MAIN_KEYWORDS, key="similarity_keyword")
-    st.dataframe(similar_articles(df, sim_kw), use_container_width=True)
+    section(f"'{selected_kw}' 관련 기사")
+    article_table(selected_articles, DATE_COL)
 
-    section("키워드 클릭해서 관련 기사 보기")
-    kw = st.selectbox("관련 기사 확인 키워드", MAIN_KEYWORDS, key="article_keyword")
-    sub = filter_keyword(df, kw)
-    st.info(f"선택된 키워드: {kw} / 관련 기사 수: {len(sub):,}건")
-    article_table(sub, DATE_COL)
+    section(f"'{selected_kw}'와 유사한 기사", "TF-IDF 벡터 간 코사인 유사도 기반입니다.")
+    st.dataframe(similar_articles(df, selected_kw), use_container_width=True)
 
 elif menu == "Trend":
     section("일별 주요 IT 키워드", "날짜별 TOP 키워드 변화로 이슈 흐름을 확인합니다.")
