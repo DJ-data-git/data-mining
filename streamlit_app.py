@@ -720,10 +720,8 @@ for group_name, group_data in MENU_TREE.items():
     is_open = st.session_state.get("open_group") == group_name or st.session_state.get("menu") in children
     arrow = "▾" if is_open else "▸"
 
-    group_class = "sidebar-group-card sidebar-group-open" if is_open else "sidebar-group-card"
-    st.sidebar.markdown(f'<div class="{group_class}">{arrow} {group_name}</div>', unsafe_allow_html=True)
-
-    if st.sidebar.button(f"열기 / 닫기", key=f"toggle_{group_name}"):
+    # 상위 메뉴 자체를 클릭하면 열고 닫히도록 처리
+    if st.sidebar.button(f"{arrow}  {group_name}", key=f"toggle_{group_name}"):
         st.session_state["open_group"] = "" if is_open else group_name
         st.rerun()
 
