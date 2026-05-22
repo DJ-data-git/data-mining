@@ -560,7 +560,10 @@ MENU_DESC = {
 }
 
 MENU_ICON = {
-    "Home": "H",
+    "Home": "⌂",
+    "텍스트 분석": "T",
+    "비교 분석": "C",
+    "데이터 탐색": "D",
     "Keyword": "K",
     "Trend": "T",
     "Network": "N",
@@ -721,7 +724,8 @@ for group_name, group_data in MENU_TREE.items():
     arrow = "▾" if is_open else "▸"
 
     # 상위 메뉴 자체를 클릭하면 열고 닫히도록 처리
-    if st.sidebar.button(f"{arrow}  {group_name}", key=f"toggle_{group_name}"):
+    group_icon = MENU_ICON.get(group_name, "•")
+    if st.sidebar.button(f"{arrow}   {group_icon}   {group_name}", key=f"toggle_{group_name}"):
         st.session_state["open_group"] = "" if is_open else group_name
         st.rerun()
 
