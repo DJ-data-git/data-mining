@@ -68,7 +68,7 @@ section[data-testid="stSidebar"] {background:#020617;}
 </style>
 """, unsafe_allow_html=True)
 
-st.title("IT News Insight Center")
+st.title("IT News Trend Analysis Dashboard")
 
 # =========================================================
 # Config
@@ -792,7 +792,7 @@ topic_ts_df = topic_timeseries(df, DATE_COL)
 tab_home, tab_keyword, tab_trend, tab_network, tab_source, tab_sentiment, tab_search = st.tabs([
     "Home",
     "Keyword",
-    "Trend",
+    "시기별 IT 뉴스 트렌드",
     "Network",
     "Source",
     "Risk",
@@ -837,7 +837,7 @@ with tab_home:
         card("오늘 리스크 이슈", "보안 / 개인정보", f"{risk_today_count:,}건 탐지", "#ef4444")
 
 
-    section("Today’s Top 10 IT Keywords")
+    section("Today’s IT Keywords Top 10")
     keyword_chip_grid(top_keywords, "keyword", "count", None, clickable=True, session_key="home_drill_keyword")
 
     if "home_drill_keyword" in st.session_state and st.session_state["home_drill_keyword"]:
@@ -921,6 +921,9 @@ with tab_keyword:
     st.dataframe(similar_articles(df, selected_kw), use_container_width=True)
 
 with tab_trend:
+    st.subheader("시기별 IT 뉴스 트렌드 분석")
+    st.caption("숙제 주제에 맞춰 날짜별 키워드 변화, 주제별 기사량 변화, 기사 급증 구간을 기준으로 시기별 IT 뉴스 트렌드를 분석합니다.")
+
     render_daily_keyword_timeline(daily_kw, top_n=5)
 
     section("Keyword Movement Detail", "선택한 키워드가 어느 날짜에 강하게 등장했는지 확인합니다.")
@@ -928,12 +931,12 @@ with tab_trend:
     sel_kw = st.selectbox("키워드별 일자 추이 확인", available_keywords)
     render_keyword_trend_detail(daily_kw, sel_kw)
 
-    section("주제별 시계열 트렌드")
+    section("시기별 주제 트렌드", "날짜별로 어떤 IT 주제가 많이 보도되었는지 확인합니다.")
     st.dataframe(topic_ts_df, use_container_width=True)
     sel_topic = st.selectbox("시계열 상세 확인 주제", list(TOPIC_MAP.keys()), key="timeseries_topic")
     st.dataframe(topic_ts_df[["date", sel_topic]].sort_values(sel_topic, ascending=False), use_container_width=True)
 
-    section("이벤트 주석 기반 시계열")
+    section("시기별 주요 이벤트 구간", "기사량이 급증한 날짜를 기준으로 주요 이슈 구간을 확인합니다.")
     st.dataframe(event_annotations(df, DATE_COL), use_container_width=True)
 
 with tab_network:
