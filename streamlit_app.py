@@ -16,7 +16,7 @@ from sklearn.metrics.pairwise import cosine_similarity
 # Page / Style
 # =========================================================
 
-st.set_page_config(page_title="IT News Intelligence Dashboard", layout="wide")
+st.set_page_config(page_title="IT 뉴스 트렌드 분석 대시보드", layout="wide")
 
 st.markdown("""
 <style>
@@ -68,7 +68,7 @@ section[data-testid="stSidebar"] {background:#020617;}
 </style>
 """, unsafe_allow_html=True)
 
-st.title("IT News Trend Analysis Dashboard")
+st.title("IT 뉴스 트렌드 분석 대시보드")
 
 # =========================================================
 # Config
@@ -280,6 +280,10 @@ def load_csvs(bucket, keys):
 
 
 def normalize_date(df):
+    if "analysis_date" in df.columns:
+        df["analysis_date"] = pd.to_datetime(df["analysis_date"], errors="coerce").dt.strftime("%Y-%m-%d").fillna("unknown")
+        return df, "analysis_date"
+
     date_col = next((c for c in ["pubDate_dt", "pubDate_ymd", "pubDate", "date", "published_date"] if c in df.columns), None)
     if not date_col:
         df["analysis_date"] = "unknown"
@@ -419,8 +423,8 @@ def render_daily_keyword_timeline(daily_df, top_n=5):
         st.warning("일별 키워드 데이터가 없습니다.")
         return
 
-    st.markdown("### Daily Keyword Heatmap")
-    st.caption("날짜가 늘어도 한눈에 볼 수 있도록 키워드별 일자 언급량을 압축해서 보여줍니다.")
+    st.markdown("### 일별 키워드 히트맵")
+    st.caption("날짜별로 어떤 IT 키워드가 강하게 등장했는지 한눈에 확인합니다.")
 
     pivot = daily_df.pivot_table(
         index="keyword",
@@ -438,7 +442,7 @@ def render_daily_keyword_timeline(daily_df, top_n=5):
         use_container_width=True
     )
 
-    st.markdown("### Daily Top Keywords Drill-down")
+    st.markdown("### 날짜별 TOP 키워드 상세")
     selected_date = st.selectbox(
         "상세 확인 날짜 선택",
         sorted(daily_df["date"].dropna().unique(), reverse=True),
@@ -508,7 +512,7 @@ def render_keyword_trend_detail(daily_df, keyword):
         st.warning(f"'{keyword}' 키워드의 일별 데이터가 없습니다.")
         return
 
-    st.markdown(f"### '{keyword}' Daily Movement")
+    st.markdown(f"### '{keyword}' 일별 움직임")
 
     cols = st.columns(3)
     with cols[0]:
@@ -538,6 +542,84 @@ def topic_timeseries(df, date_col):
             row[topic] = len(filter_keywords(sub, kws))
         rows.append(row)
     return pd.DataFrame(rows)
+
+
+def keyword_daily_matrix(df, date_col):
+    rows = []
+
+    for date in sorted(df[date_col].dropna().unique()):
+        sub = df[df[date_col] == date]
+        counts = keyword_counts(sub, MAIN_KEYWORDS)
+
+        for _, row in counts.iterrows():
+            rows.append({
+                "date": date,
+                "keyword": row["keyword"],
+                "count": int(row["count"])
+            })
+
+    return pd.DataFrame(rows)
+
+
+def surge_sustain_analysis(df, date_col):
+    """
+    키워드별 총 언급량, 등장 일수, 최대 증가율을 계산해
+    지속형/급등형/이벤트형/관찰형으로 분류한다.
+    """
+    daily = keyword_daily_matrix(df, date_col)
+
+    if daily.empty:
+        return pd.DataFrame(columns=[
+            "keyword", "total_count", "active_days", "max_count",
+            "avg_count", "max_growth_rate", "trend_type"
+        ])
+
+    pivot = daily.pivot_table(
+        index="date",
+        columns="keyword",
+        values="count",
+        aggfunc="sum",
+        fill_value=0
+    ).sort_index()
+
+    rows = []
+
+    for keyword in pivot.columns:
+        series = pivot[keyword].astype(float)
+        total_count = int(series.sum())
+        active_days = int((series > 0).sum())
+        max_count = int(series.max())
+        avg_count = round(float(series.mean()), 2)
+
+        prev = series.shift(1).replace(0, pd.NA)
+        growth = ((series - prev) / prev * 100).replace([float("inf"), -float("inf")], pd.NA)
+        max_growth_rate = round(float(growth.max()), 1) if growth.notna().any() else 0.0
+
+        if active_days >= max(3, int(len(series) * 0.6)):
+            trend_type = "지속형"
+        elif max_growth_rate >= 100:
+            trend_type = "급등형"
+        elif active_days <= 2 and max_count >= 5:
+            trend_type = "이벤트형"
+        else:
+            trend_type = "관찰형"
+
+        rows.append({
+            "keyword": keyword,
+            "total_count": total_count,
+            "active_days": active_days,
+            "max_count": max_count,
+            "avg_count": avg_count,
+            "max_growth_rate": max_growth_rate,
+            "trend_type": trend_type
+        })
+
+    result = pd.DataFrame(rows)
+
+    if result.empty:
+        return result
+
+    return result.sort_values(["trend_type", "total_count"], ascending=[True, False]).reset_index(drop=True)
 
 
 def keyword_network(df):
@@ -714,7 +796,7 @@ def render_strong_connections(net_df, top_n=6):
         st.warning("표시할 키워드 연결 데이터가 없습니다.")
         return
 
-    st.markdown("### Strongest Keyword Connections")
+    st.markdown("### 주요 키워드 연결")
     st.caption("같은 기사 안에서 가장 자주 함께 등장한 키워드 조합입니다.")
 
     view = net_df.head(top_n).reset_index(drop=True)
@@ -780,6 +862,7 @@ net_df = keyword_network(df)
 topic_df = topic_counts(latest_df)
 topic_sent_df = topic_sentiment(df)
 topic_ts_df = topic_timeseries(df, DATE_COL)
+surge_df = surge_sustain_analysis(df, DATE_COL)
 
 # =========================================================
 # Sidebar Menu
@@ -789,14 +872,15 @@ topic_ts_df = topic_timeseries(df, DATE_COL)
 # Top Tab Menu
 # =========================================================
 
-tab_home, tab_keyword, tab_trend, tab_network, tab_source, tab_sentiment, tab_search = st.tabs([
+tab_home, tab_summary, tab_keyword, tab_trend, tab_surge, tab_source, tab_sentiment, tab_network = st.tabs([
     "Home",
-    "Keyword",
-    "시기별 IT 뉴스 트렌드",
-    "Network",
-    "Source",
-    "Risk",
-    "Search"
+    "트렌드 요약",
+    "IT 키워드 동향",
+    "시기별 트렌드",
+    "급등/지속 트렌드",
+    "출처별 프레임",
+    "리스크 분석",
+    "네트워크 분석"
 ])
 
 # =========================================================
@@ -805,7 +889,7 @@ tab_home, tab_keyword, tab_trend, tab_network, tab_source, tab_sentiment, tab_se
 
 
 with tab_home:
-    st.subheader("Today’s IT News Briefing")
+    st.subheader("오늘의 IT 뉴스 브리핑")
 
     top_kw = top_keywords.iloc[0]["keyword"] if not top_keywords.empty else "-"
     top_kw_count = int(top_keywords.iloc[0]["count"]) if not top_keywords.empty else 0
@@ -832,12 +916,12 @@ with tab_home:
     with c2:
         card("오늘 핵심 주제", top_topic, f"{top_topic_count:,}건 관련 기사")
     with c3:
-        card("오늘 메가 트렌드", mega_trend, mega_desc)
+        card("오늘의 연결 이슈", mega_trend, mega_desc)
     with c4:
         card("오늘 리스크 이슈", "보안 / 개인정보", f"{risk_today_count:,}건 탐지", "#ef4444")
 
 
-    section("Today’s IT Keywords Top 10")
+    section("오늘의 IT 키워드 TOP 10")
     keyword_chip_grid(top_keywords, "keyword", "count", None, clickable=True, session_key="home_drill_keyword")
 
     if "home_drill_keyword" in st.session_state and st.session_state["home_drill_keyword"]:
@@ -847,7 +931,7 @@ with tab_home:
         st.info(f"선택된 키워드: {drill_kw} / 관련 기사 수: {len(drill_df):,}건")
         article_table(drill_df, DATE_COL)
 
-    section("Today’s Key Insights")
+    section("오늘의 핵심 인사이트")
 
     ai_semi_count = 0
     risk_count = 0
@@ -860,19 +944,19 @@ with tab_home:
 
     insight_cards = [
         {
-            "title": "AI와 반도체 결합 이슈 증가",
+            "title": "AI와 반도체 결합 이슈",
             "value": f"{ai_semi_count:,}건",
             "desc": "HBM · GPU · AI반도체 관련 보도가 함께 증가하는 흐름",
             "color": "#38bdf8"
         },
         {
-            "title": "보안 리스크 지속 확대",
+            "title": "보안 리스크 이슈",
             "value": f"{risk_count:,}건",
             "desc": "개인정보 · 해킹 · 침해 · 취약점 중심의 리스크 보도 감지",
             "color": "#ef4444"
         },
         {
-            "title": "클라우드 인프라 확장",
+            "title": "클라우드 인프라 이슈",
             "value": f"{cloud_count:,}건",
             "desc": "AWS · Azure · 데이터센터 · 서버 인프라 관련 보도 흐름",
             "color": "#22c55e"
@@ -890,9 +974,40 @@ with tab_home:
                 item["color"]
             )
 
+
+with tab_summary:
+    st.subheader("트렌드 요약")
+    st.caption("전체 수집 기간의 핵심 키워드, 주제, 급등/지속 트렌드를 한 화면에서 요약합니다.")
+
+    min_date = df[DATE_COL].min()
+    max_date = df[DATE_COL].max()
+    total_days = df[DATE_COL].nunique()
+
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        card("분석 기간", f"{min_date} ~ {max_date}", f"총 {total_days:,}일 기준")
+    with c2:
+        card("전체 기사 수", f"{len(df):,}건", "S3 processed CSV 기준")
+    with c3:
+        card("분석 소스 수", f"{df['analysis_source'].nunique():,}개", "뉴스 수집 출처 기준")
+
+    section("전체 기간 주요 키워드")
+    all_keyword_df = keyword_counts(df, MAIN_KEYWORDS).head(10)
+    keyword_chip_grid(all_keyword_df, "keyword", "count", None)
+
+    section("트렌드 유형 요약")
+    if surge_df.empty:
+        st.warning("급등/지속 트렌드 분석 데이터가 없습니다.")
+    else:
+        type_count = surge_df["trend_type"].value_counts().reset_index()
+        type_count.columns = ["trend_type", "count"]
+        progress_list(type_count, "trend_type", "count", "트렌드 유형별 키워드 수", top_n=10, suffix="개")
+        st.dataframe(surge_df, use_container_width=True)
+
+
 with tab_keyword:
-    st.subheader("키워드 분석")
-    st.caption("키워드를 선택하면 관련 기사, TF-IDF 중요도, 유사 기사까지 한 번에 확인합니다.")
+    st.subheader("IT 키워드 동향 분석")
+    st.caption("뉴스 제목과 요약문에서 주요 IT 키워드의 등장 빈도, 관련 기사, 유사 기사를 분석합니다.")
 
     keyword_options = top_keywords["keyword"].tolist() if not top_keywords.empty else MAIN_KEYWORDS
     selected_kw = st.selectbox("분석할 키워드 선택", keyword_options, key="keyword_page_select")
@@ -922,11 +1037,12 @@ with tab_keyword:
 
 with tab_trend:
     st.subheader("시기별 IT 뉴스 트렌드 분석")
+    st.info(f"본 대시보드는 {df[DATE_COL].min()}부터 {df[DATE_COL].max()}까지의 데이터를 기준으로 일별 단위의 IT 뉴스 트렌드를 분석합니다.")
     st.caption("숙제 주제에 맞춰 날짜별 키워드 변화, 주제별 기사량 변화, 기사 급증 구간을 기준으로 시기별 IT 뉴스 트렌드를 분석합니다.")
 
     render_daily_keyword_timeline(daily_kw, top_n=5)
 
-    section("Keyword Movement Detail", "선택한 키워드가 어느 날짜에 강하게 등장했는지 확인합니다.")
+    section("키워드별 일자 추이", "선택한 키워드가 어느 날짜에 강하게 등장했는지 확인합니다.")
     available_keywords = daily_kw["keyword"].dropna().unique().tolist() if not daily_kw.empty else MAIN_KEYWORDS
     sel_kw = st.selectbox("키워드별 일자 추이 확인", available_keywords)
     render_keyword_trend_detail(daily_kw, sel_kw)
@@ -939,8 +1055,46 @@ with tab_trend:
     section("시기별 주요 이벤트 구간", "기사량이 급증한 날짜를 기준으로 주요 이슈 구간을 확인합니다.")
     st.dataframe(event_annotations(df, DATE_COL), use_container_width=True)
 
+
+with tab_surge:
+    st.subheader("급등/지속 트렌드 분석")
+    st.caption("단순 빈도뿐 아니라 증가율과 등장 일수를 함께 분석하여 키워드를 급등형·지속형·이벤트형으로 분류합니다.")
+
+    if surge_df.empty:
+        st.warning("급등/지속 트렌드 분석 데이터가 없습니다.")
+    else:
+        sustained = surge_df[surge_df["trend_type"] == "지속형"]
+        surged = surge_df[surge_df["trend_type"] == "급등형"]
+        event_like = surge_df[surge_df["trend_type"] == "이벤트형"]
+
+        c1, c2, c3, c4 = st.columns(4)
+        with c1:
+            card("지속형 키워드", f"{len(sustained):,}개", "여러 날짜에 반복적으로 등장")
+        with c2:
+            card("급등형 키워드", f"{len(surged):,}개", "전일 대비 증가율이 큰 키워드", "#ef4444")
+        with c3:
+            card("이벤트형 키워드", f"{len(event_like):,}개", "특정 날짜에 집중된 키워드", "#eab308")
+        with c4:
+            top_total = surge_df.sort_values("total_count", ascending=False).iloc[0]["keyword"] if not surge_df.empty else "-"
+            card("대표 트렌드 키워드", top_total, "총 언급량 기준")
+
+        section("트렌드 유형별 상세 결과")
+        selected_type = st.selectbox("트렌드 유형 선택", ["전체", "지속형", "급등형", "이벤트형", "관찰형"])
+
+        if selected_type == "전체":
+            view = surge_df
+        else:
+            view = surge_df[surge_df["trend_type"] == selected_type]
+
+        st.dataframe(view, use_container_width=True)
+
+        section("급등률 TOP 10")
+        growth_top = surge_df.sort_values("max_growth_rate", ascending=False).head(10)
+        progress_list(growth_top, "keyword", "max_growth_rate", "전일 대비 최대 증가율", top_n=10, suffix="%")
+
+
 with tab_network:
-    section("IT Keyword Intelligence Network", "키워드가 함께 등장하는 구조를 네트워크 맵으로 시각화합니다.")
+    section("네트워크 분석", "같은 기사 안에서 함께 등장한 키워드 쌍을 분석해 IT 이슈 간 연결 구조를 시각화합니다.")
 
     render_network_summary(net_df)
 
@@ -952,7 +1106,7 @@ with tab_network:
     render_strong_connections(net_df, top_n=6)
 
 with tab_source:
-    section("뉴스 수집 소스 기준 분석")
+    section("출처별 보도 프레임 분석", "뉴스 출처별 기사 수, 주요 키워드, 주제 비중, 보도 프레임 차이를 분석합니다.")
     source_count = df["analysis_source"].value_counts().reset_index()
     source_count.columns = ["source", "count"]
     progress_list(source_count, "source", "count", "수집 소스별 기사 수", top_n=12)
@@ -966,7 +1120,7 @@ with tab_source:
     section("소스별 보도 주제 비중")
     st.dataframe(source_topic_ratio(df), use_container_width=True)
 
-    section("소스별 보도 프레임 분석")
+    section("소스별 보도 프레임")
     frame_df = source_frame(df)
     st.dataframe(frame_df, use_container_width=True)
     frame = st.selectbox("프레임 선택", ["성장/혁신", "보안/리스크", "산업/경쟁", "정책/규제", "인프라/클라우드"])
@@ -974,7 +1128,7 @@ with tab_source:
         progress_list(frame_df[["source", frame]].sort_values(frame, ascending=False), "source", frame, f"{frame} 프레임 TOP 10")
 
 with tab_sentiment:
-    section("주제별 감성 지수 교차 분석")
+    section("주제별 감성/리스크 교차 분석")
     st.dataframe(topic_sent_df, use_container_width=True)
     cols = st.columns(3)
     for idx, (_, row) in enumerate(topic_sent_df.sort_values("risk_ratio", ascending=False).head(3).iterrows()):
@@ -992,17 +1146,3 @@ with tab_sentiment:
 
     with st.expander("부정/리스크 기사 보기"):
         article_table(df[df["sentiment_group"] == "부정/리스크"], DATE_COL)
-
-with tab_search:
-    section("전체 기사 검색")
-    q = st.text_input("검색어를 입력하세요")
-    if q:
-        result = filter_keyword(df, q)
-        st.write(f"검색 결과: {len(result):,}건")
-        article_table(result, DATE_COL)
-
-    with st.expander("원본 데이터 보기"):
-        st.dataframe(df, use_container_width=True)
-    with st.expander("불러온 파일 목록"):
-        for k in sorted(keys):
-            st.write(k)
