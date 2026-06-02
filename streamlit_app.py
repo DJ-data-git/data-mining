@@ -1222,12 +1222,18 @@ with tab_overview:
     )
 
     period_summary_df = period_article_summary(summary_df, PERIOD_COL)
+    if not period_summary_df.empty:
+        period_summary_df["period_label"] = period_summary_df[PERIOD_COL].map(period_label_map).fillna(period_summary_df[PERIOD_COL])
+
     period_top_df = period_summary_df.sort_values("article_count", ascending=False).head(5)
     period_surge_df = period_summary_df.sort_values("change", ascending=False).head(5)
 
     periods = sorted(summary_df[PERIOD_COL].dropna().unique())
     current_period = periods[-1] if periods else "-"
     prev_period = periods[-2] if len(periods) >= 2 else "-"
+    current_period_label = period_label_map.get(current_period, current_period)
+    prev_period_label = period_label_map.get(prev_period, prev_period)
+
     current_period_df = summary_df[summary_df[PERIOD_COL] == current_period].copy() if periods else summary_df.copy()
     prev_period_df = summary_df[summary_df[PERIOD_COL] == prev_period].copy() if len(periods) >= 2 else pd.DataFrame()
 
@@ -1236,12 +1242,16 @@ with tab_overview:
     period_topic_all_df = topic_counts(summary_df)
     period_current_topic_df = topic_counts(current_period_df)
     period_movers_df = period_keyword_movers(summary_df, PERIOD_COL, MAIN_KEYWORDS, top_n=10)
+    if not period_movers_df.empty:
+        period_movers_df["current_period_label"] = period_movers_df["current_period"].map(period_label_map).fillna(period_movers_df["current_period"])
+        period_movers_df["prev_period_label"] = period_movers_df["prev_period"].map(period_label_map).fillna(period_movers_df["prev_period"])
+
     period_topic_ts_df = period_topic_summary(summary_df, PERIOD_COL)
+    if not period_topic_ts_df.empty:
+        period_topic_ts_df["period_label"] = period_topic_ts_df["period"].map(period_label_map).fillna(period_topic_ts_df["period"])
 
     min_date = df[DATE_COL].min()
     max_date = df[DATE_COL].max()
-    current_period_label = get_current_period_label(max_date, period_option)
-    current_period_value = get_period_group_value(max_date, period_option)
     total_periods = summary_df[PERIOD_COL].nunique()
     total_articles = len(summary_df)
     current_articles = len(current_period_df)
@@ -1259,7 +1269,7 @@ with tab_overview:
     with c1:
         card("현재 분석 구간", current_period_label, f"원본 수집 범위 {min_date} ~ {max_date} / {period_option} 기준 {total_periods:,}개 구간")
     with c2:
-        card("전체 기사 수", f"{total_articles:,}건", f"현재 구간 {current_period}: {current_articles:,}건")
+        card("전체 기사 수", f"{total_articles:,}건", f"현재 구간 {current_period_label}: {current_articles:,}건")
     with c3:
         card("핵심 키워드", top_keyword, f"{period_option} 재집계 기준 {top_keyword_count:,}건")
     with c4:
@@ -1269,7 +1279,7 @@ with tab_overview:
 
     top_surge_kw = safe_first_value(period_movers_df, "keyword")
     top_surge_change = int(safe_first_value(period_movers_df, "change", 0)) if not period_movers_df.empty else 0
-    peak_period = safe_first_value(period_top_df, PERIOD_COL)
+    peak_period = safe_first_value(period_top_df, "period_label")
     peak_count = int(safe_first_value(period_top_df, "article_count", 0)) if not period_top_df.empty else 0
     current_top_kw = safe_first_value(period_current_keyword_df, "keyword")
     current_top_topic = safe_first_value(period_current_topic_df, "topic")
@@ -1281,7 +1291,7 @@ with tab_overview:
             f"원본 수집 날짜 범위는 {min_date} ~ {max_date}이며, 선택한 단위에 따라 당일/해당 주/해당 월/해당 연도 기준으로 재집계됩니다.",
             f"전체 범위에서 가장 강한 키워드는 '{top_keyword}'이며, 총 {top_keyword_count:,}건 확인됩니다.",
             f"기사량이 가장 집중된 구간은 {peak_period}이며, 해당 구간 기사 수는 {peak_count:,}건입니다.",
-            f"현재 구간({current_period})의 핵심 키워드는 '{current_top_kw}', 핵심 주제는 '{current_top_topic}'입니다.",
+            f"현재 구간({current_period_label})의 핵심 키워드는 '{current_top_kw}', 핵심 주제는 '{current_top_topic}'입니다.",
             f"직전 구간 대비 가장 크게 증가한 키워드는 '{top_surge_kw}'이며, 변화량은 {top_surge_change:+,}건입니다.",
         ]
     )
@@ -1291,12 +1301,12 @@ with tab_overview:
     with col_a:
         st.markdown(f"### {period_option} 기사량 추이")
         if not period_summary_df.empty:
-            st.line_chart(period_summary_df.set_index(PERIOD_COL)[["article_count"]])
+            st.line_chart(period_summary_df.set_index("period_label")[["article_count"]])
             st.dataframe(period_summary_df.sort_values(PERIOD_COL, ascending=False), use_container_width=True)
         else:
             st.warning("기사량 집계 데이터가 없습니다.")
     with col_b:
-        progress_list(period_top_df, PERIOD_COL, "article_count", f"기사량이 많은 {period_option} 구간 TOP 5", top_n=5)
+        progress_list(period_top_df, "period_label", "article_count", f"기사량이 많은 {period_option} 구간 TOP 5", top_n=5)
         st.markdown("### 증가폭 TOP 5")
         st.dataframe(period_surge_df, use_container_width=True)
 
@@ -1304,15 +1314,15 @@ with tab_overview:
     col_c, col_d = st.columns(2)
     with col_c:
         progress_list(period_all_keyword_df.head(10), "keyword", "count", f"전체 범위 핵심 키워드 TOP 10", top_n=10)
-        st.markdown(f"### 현재 구간({current_period}) 핵심 키워드")
+        st.markdown(f"### 현재 구간({current_period_label}) 핵심 키워드")
         st.dataframe(period_current_keyword_df, use_container_width=True)
     with col_d:
         progress_list(period_topic_all_df.head(8), "topic", "count", f"전체 범위 핵심 주제", top_n=8)
-        st.markdown(f"### 현재 구간({current_period}) 핵심 주제")
+        st.markdown(f"### 현재 구간({current_period_label}) 핵심 주제")
         st.dataframe(period_current_topic_df, use_container_width=True)
 
     section("직전 구간 대비 키워드 변화")
-    st.caption(f"{prev_period} → {current_period} 기준으로 키워드 증가/감소를 계산합니다.")
+    st.caption(f"{prev_period_label} → {current_period_label} 기준으로 키워드 증가/감소를 계산합니다.")
     if period_movers_df.empty:
         st.warning("비교 가능한 이전 구간이 부족합니다. 데이터가 더 쌓이면 변화 분석이 가능합니다.")
     else:
@@ -1326,7 +1336,7 @@ with tab_overview:
         st.dataframe(period_topic_ts_df, use_container_width=True)
         selected_period_topic = st.selectbox("상세 확인 주제", sorted(period_topic_ts_df["topic"].dropna().unique().tolist()), key="summary_period_topic_select")
         topic_line_df = period_topic_ts_df[period_topic_ts_df["topic"] == selected_period_topic].sort_values("period")
-        st.line_chart(topic_line_df.set_index("period")[["count"]])
+        st.line_chart(topic_line_df.set_index("period_label")[["count"]])
 
     section("발표용 설명")
     st.info(f"""
