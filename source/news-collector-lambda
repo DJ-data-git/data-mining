@@ -1,0 +1,566 @@
+import os
+import json
+import csv
+import io
+import urllib.parse
+import urllib.request
+import re
+import time
+import xml.etree.ElementTree as ET
+from datetime import datetime, timezone, timedelta
+from email.utils import parsedate_to_datetime
+from urllib.parse import urlparse
+
+import boto3
+
+s3 = boto3.client("s3")
+
+NAVER_CLIENT_ID = os.environ["NAVER_CLIENT_ID"]
+NAVER_CLIENT_SECRET = os.environ["NAVER_CLIENT_SECRET"]
+BUCKET_NAME = os.environ["BUCKET_NAME"]
+
+PREFIX = os.environ.get("PREFIX", "it_news")
+CATEGORY_FOLDER = "IT"
+
+IT_RSS_FEEDS = {
+    "datanet": "https://www.datanet.co.kr/rss/allArticle.xml",
+    "etnews_today": "http://rss.etnews.com/Section901.xml",
+    "etnews_sw": "http://rss.etnews.com/04.xml",
+    "etnews_ai": "http://rss.etnews.com/04046.xml",
+}
+
+GOOGLE_SITE_QUERIES = {
+    "zdnet": {
+        "query": "site:zdnet.co.kr IT OR 인공지능 OR 클라우드 OR 반도체 OR 보안",
+        "media_domain": "zdnet.co.kr"
+    },
+    "ddaily": {
+        "query": "site:ddaily.co.kr IT OR 인공지능 OR 클라우드 OR 반도체 OR 보안",
+        "media_domain": "ddaily.co.kr"
+    },
+    "itworld": {
+        "query": "site:itworld.co.kr IT OR 인공지능 OR 클라우드 OR 보안",
+        "media_domain": "itworld.co.kr"
+    },
+    "itnews": {
+        "query": "site:itnews.or.kr IT OR 인공지능 OR 과학기술 OR 반도체",
+        "media_domain": "itnews.or.kr"
+    },
+    "daum_it": {
+        "query": "site:v.daum.net IT OR 디지털 OR 인공지능 OR 반도체",
+        "media_domain": "v.daum.net"
+    },
+    "digitaltoday": {
+        "query": "site:digitaltoday.co.kr IT OR 인공지능 OR 블록체인 OR 클라우드",
+        "media_domain": "digitaltoday.co.kr"
+    },
+    "aitimes": {
+        "query": "site:aitimes.com AI OR 인공지능 OR 생성형AI",
+        "media_domain": "aitimes.com"
+    },
+    "boannews": {
+        "query": "site:boannews.com 보안 OR 해킹 OR 개인정보 OR 클라우드",
+        "media_domain": "boannews.com"
+    },
+    "ciokorea": {
+        "query": "site:ciokorea.com IT OR CIO OR 클라우드 OR 보안",
+        "media_domain": "ciokorea.com"
+    },
+    "techworld": {
+        "query": "site:epnc.co.kr 반도체 OR AI OR 임베디드 OR 전자",
+        "media_domain": "epnc.co.kr"
+    }
+}
+
+
+def clean_html(text):
+    return re.sub(r"<.*?>", "", text or "").strip()
+
+
+def format_pubdate_ymd(date_str):
+    try:
+        dt = parsedate_to_datetime(date_str)
+        return dt.strftime("%Y-%m-%d")
+    except Exception:
+        return date_str
+
+
+def extract_domain(url):
+    try:
+        if not url:
+            return ""
+
+        parsed = urlparse(url)
+        domain = parsed.netloc.lower()
+
+        if domain.startswith("www."):
+            domain = domain[4:]
+
+        return domain
+    except Exception:
+        return ""
+
+
+def add_media_domain(item, fallback_domain=""):
+    domain = (
+        extract_domain(item.get("originallink", ""))
+        or extract_domain(item.get("link", ""))
+        or fallback_domain
+    )
+
+    item["media_domain"] = domain or fallback_domain or item.get("source", "")
+    return item
+
+
+def fetch_naver_news(query, display=100, start=1, sort="date"):
+    base_url = "https://openapi.naver.com/v1/search/news.json"
+
+    params = {
+        "query": query,
+        "display": display,
+        "start": start,
+        "sort": sort
+    }
+
+    url = f"{base_url}?{urllib.parse.urlencode(params)}"
+
+    req = urllib.request.Request(url)
+    req.add_header("X-Naver-Client-Id", NAVER_CLIENT_ID)
+    req.add_header("X-Naver-Client-Secret", NAVER_CLIENT_SECRET)
+
+    with urllib.request.urlopen(req) as response:
+        body = response.read().decode("utf-8")
+        return json.loads(body)
+
+
+def fetch_all_naver_news(query, sort="date", max_items=1000):
+    all_items = []
+    first_meta = None
+    start = 1
+
+    while start <= 1000 and len(all_items) < max_items:
+        remaining = max_items - len(all_items)
+        display = min(100, remaining)
+
+        result = fetch_naver_news(
+            query=query,
+            display=display,
+            start=start,
+            sort=sort
+        )
+
+        if first_meta is None:
+            first_meta = {
+                "lastBuildDate": result.get("lastBuildDate", ""),
+                "total": result.get("total", ""),
+                "start": result.get("start", ""),
+                "display": result.get("display", "")
+            }
+
+        items = result.get("items", [])
+
+        if not items:
+            break
+
+        for item in items:
+            news_item = {
+                "source": "naver",
+                "source_group": "naver_api",
+                "title": clean_html(item.get("title", "")),
+                "originallink": item.get("originallink", ""),
+                "link": item.get("link", ""),
+                "description": clean_html(item.get("description", "")),
+                "pubDate": item.get("pubDate", ""),
+                "pubDate_ymd": format_pubdate_ymd(item.get("pubDate", ""))
+            }
+
+            all_items.append(add_media_domain(news_item, "naver"))
+
+        if len(items) < display:
+            break
+
+        start += display
+        time.sleep(0.1)
+
+    return all_items[:max_items], first_meta or {}
+
+
+def fetch_google_news_rss(query, hl="ko", gl="KR", ceid="KR:ko"):
+    encoded_query = urllib.parse.quote(query)
+
+    url = (
+        f"https://news.google.com/rss/search?"
+        f"q={encoded_query}&hl={hl}&gl={gl}&ceid={ceid}"
+    )
+
+    req = urllib.request.Request(
+        url,
+        headers={"User-Agent": "Mozilla/5.0"}
+    )
+
+    with urllib.request.urlopen(req) as response:
+        return response.read()
+
+
+def fetch_all_google_news(
+    query,
+    max_items=100,
+    source_name="google",
+    source_group="google_news",
+    fallback_domain=""
+):
+    xml_data = fetch_google_news_rss(query)
+    root = ET.fromstring(xml_data)
+
+    channel = root.find("channel")
+
+    if channel is None:
+        return [], {}
+
+    rss_items = channel.findall("item")
+    all_items = []
+
+    for item in rss_items[:max_items]:
+        title = item.findtext("title", default="")
+        link = item.findtext("link", default="")
+        description = item.findtext("description", default="")
+        pub_date = item.findtext("pubDate", default="")
+
+        news_item = {
+            "source": source_name,
+            "source_group": source_group,
+            "title": clean_html(title),
+            "originallink": link,
+            "link": link,
+            "description": clean_html(description),
+            "pubDate": pub_date,
+            "pubDate_ymd": format_pubdate_ymd(pub_date)
+        }
+
+        all_items.append(add_media_domain(news_item, fallback_domain))
+
+    meta = {
+        "lastBuildDate": channel.findtext("lastBuildDate", default=""),
+        "total": len(all_items),
+        "start": 1,
+        "display": len(all_items)
+    }
+
+    return all_items, meta
+
+
+def fetch_rss_feed(feed_name, feed_url, max_items=100):
+    req = urllib.request.Request(
+        feed_url,
+        headers={"User-Agent": "Mozilla/5.0"}
+    )
+
+    with urllib.request.urlopen(req) as response:
+        xml_data = response.read()
+
+    root = ET.fromstring(xml_data)
+    channel = root.find("channel")
+
+    if channel is None:
+        return [], {}
+
+    rss_items = channel.findall("item")
+    all_items = []
+
+    fallback_domain = extract_domain(feed_url)
+
+    for item in rss_items[:max_items]:
+        title = item.findtext("title", default="")
+        link = item.findtext("link", default="")
+        description = item.findtext("description", default="")
+        pub_date = item.findtext("pubDate", default="")
+
+        news_item = {
+            "source": feed_name,
+            "source_group": "official_rss",
+            "title": clean_html(title),
+            "originallink": link,
+            "link": link,
+            "description": clean_html(description),
+            "pubDate": pub_date,
+            "pubDate_ymd": format_pubdate_ymd(pub_date)
+        }
+
+        all_items.append(add_media_domain(news_item, fallback_domain))
+
+    meta = {
+        "lastBuildDate": channel.findtext("lastBuildDate", default=""),
+        "total": len(all_items),
+        "start": 1,
+        "display": len(all_items)
+    }
+
+    return all_items, meta
+
+
+def deduplicate_items(items):
+    seen = set()
+    unique_items = []
+
+    for item in items:
+        key = (
+            item.get("originallink")
+            or item.get("link")
+            or f"{item.get('title', '')}_{item.get('pubDate_ymd', '')}_{item.get('source', '')}"
+        )
+
+        if key and key not in seen:
+            seen.add(key)
+            unique_items.append(item)
+
+    return unique_items
+
+
+def save_json_to_s3(data, bucket, key):
+    s3.put_object(
+        Bucket=bucket,
+        Key=key,
+        Body=json.dumps(
+            data,
+            ensure_ascii=False,
+            indent=2
+        ).encode("utf-8"),
+        ContentType="application/json; charset=utf-8"
+    )
+
+
+def save_csv_to_s3(items, bucket, key, meta):
+    output = io.StringIO()
+    writer = csv.writer(output)
+
+    writer.writerow([
+        "source",
+        "source_group",
+        "media_domain",
+        "lastBuildDate",
+        "total",
+        "start",
+        "display",
+        "title",
+        "originallink",
+        "link",
+        "description",
+        "pubDate",
+        "pubDate_ymd"
+    ])
+
+    for item in items:
+        writer.writerow([
+            item.get("source", ""),
+            item.get("source_group", ""),
+            item.get("media_domain", ""),
+            meta.get("lastBuildDate", ""),
+            meta.get("total", ""),
+            meta.get("start", ""),
+            meta.get("display", ""),
+            item.get("title", ""),
+            item.get("originallink", ""),
+            item.get("link", ""),
+            item.get("description", ""),
+            item.get("pubDate", ""),
+            item.get("pubDate_ymd", "")
+        ])
+
+    s3.put_object(
+        Bucket=bucket,
+        Key=key,
+        Body=output.getvalue().encode("utf-8-sig"),
+        ContentType="text/csv; charset=utf-8"
+    )
+
+
+def get_news_source(event):
+    source = event.get("news_source")
+
+    if not source:
+        source = event.get("source", "all")
+
+    source = str(source).lower()
+
+    if source.startswith("aws."):
+        source = "all"
+
+    if source not in ["naver", "google", "rss", "all"]:
+        source = "all"
+
+    return source
+
+
+def lambda_handler(event, context):
+    print("Received event:")
+    print(json.dumps(event, ensure_ascii=False))
+
+    query = event.get("query", "IT")
+    source = get_news_source(event)
+    sort = event.get("sort", "date")
+
+    naver_max_items = int(event.get("naver_max_items", 500))
+    google_max_items = int(event.get("google_max_items", 200))
+    rss_max_items = int(event.get("rss_max_items", 100))
+
+    naver_max_items = min(naver_max_items, 1000)
+
+    kst = timezone(timedelta(hours=9))
+    now = datetime.now(kst)
+
+    date_path = now.strftime("%Y/%m/%d")
+    hour_path = now.strftime("%H")
+    timestamp = now.strftime("%Y%m%d_%H%M%S")
+
+    all_items = []
+    meta_by_source = {}
+
+    if source in ["naver", "all"]:
+        try:
+            naver_items, naver_meta = fetch_all_naver_news(
+                query=query,
+                sort=sort,
+                max_items=naver_max_items
+            )
+
+            all_items.extend(naver_items)
+            meta_by_source["naver"] = naver_meta
+
+        except Exception as e:
+            error_message = f"Naver fetch failed: {str(e)}"
+            print(error_message)
+
+            meta_by_source["naver"] = {
+                "error": error_message,
+                "total": 0
+            }
+
+    if source in ["google", "all"]:
+        try:
+            google_items, google_meta = fetch_all_google_news(
+                query=query,
+                max_items=google_max_items,
+                source_name="google",
+                source_group="google_news",
+                fallback_domain="google_news"
+            )
+
+            all_items.extend(google_items)
+            meta_by_source["google"] = google_meta
+
+        except Exception as e:
+            error_message = f"Google fetch failed: {str(e)}"
+            print(error_message)
+
+            meta_by_source["google"] = {
+                "error": error_message,
+                "total": 0
+            }
+
+    if source in ["rss", "all"]:
+        for feed_name, feed_url in IT_RSS_FEEDS.items():
+            try:
+                rss_items, rss_meta = fetch_rss_feed(
+                    feed_name,
+                    feed_url,
+                    max_items=rss_max_items
+                )
+
+                all_items.extend(rss_items)
+                meta_by_source[feed_name] = rss_meta
+
+            except Exception as e:
+                error_message = f"RSS fetch failed: {feed_name} - {str(e)}"
+                print(error_message)
+
+                meta_by_source[feed_name] = {
+                    "error": error_message,
+                    "total": 0
+                }
+
+        for feed_name, feed_info in GOOGLE_SITE_QUERIES.items():
+            try:
+                google_site_items, google_site_meta = fetch_all_google_news(
+                    query=feed_info["query"],
+                    max_items=rss_max_items,
+                    source_name=feed_name,
+                    source_group="google_site_search",
+                    fallback_domain=feed_info["media_domain"]
+                )
+
+                all_items.extend(google_site_items)
+                meta_by_source[feed_name] = google_site_meta
+
+            except Exception as e:
+                error_message = f"Google site RSS fetch failed: {feed_name} - {str(e)}"
+                print(error_message)
+
+                meta_by_source[feed_name] = {
+                    "error": error_message,
+                    "total": 0
+                }
+
+    all_items = deduplicate_items(all_items)
+
+    combined_meta = {
+        "query": query,
+        "category_folder": CATEGORY_FOLDER,
+        "source": source,
+        "collected_at": now.isoformat(),
+        "item_count": len(all_items),
+        "meta_by_source": meta_by_source
+    }
+
+    csv_meta = {
+        "lastBuildDate": now.strftime("%Y-%m-%d %H:%M:%S"),
+        "total": len(all_items),
+        "start": 1,
+        "display": len(all_items)
+    }
+
+    file_prefix = source
+
+    json_key = (
+        f"{PREFIX}/"
+        f"{CATEGORY_FOLDER}/"
+        f"raw/"
+        f"{date_path}/"
+        f"{hour_path}/"
+        f"{file_prefix}_{timestamp}.json"
+    )
+
+    csv_key = (
+        f"{PREFIX}/"
+        f"{CATEGORY_FOLDER}/"
+        f"raw/"
+        f"{date_path}/"
+        f"{hour_path}/"
+        f"{file_prefix}_{timestamp}.csv"
+    )
+
+    save_json_to_s3(
+        {
+            "meta": combined_meta,
+            "items": all_items
+        },
+        BUCKET_NAME,
+        json_key
+    )
+
+    save_csv_to_s3(
+        all_items,
+        BUCKET_NAME,
+        csv_key,
+        csv_meta
+    )
+
+    return {
+        "statusCode": 200,
+        "message": "Saved IT news raw data to S3 successfully",
+        "query": query,
+        "source": source,
+        "item_count": len(all_items),
+        "json_key": json_key,
+        "csv_key": csv_key,
+        "meta_by_source": meta_by_source
+    }
