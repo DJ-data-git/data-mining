@@ -1178,33 +1178,209 @@ with tab_summary:
 
 with tab_keyword:
     st.subheader("IT 키워드 동향 분석")
-    st.caption("뉴스 제목과 요약문에서 주요 IT 키워드의 등장 빈도, 관련 기사, 유사 기사를 분석합니다.")
+    st.caption("단순 키워드 검색이 아니라, 전체 기간과 최신일의 키워드 변화·집중도·트렌드 유형을 함께 분석합니다.")
 
-    keyword_options = top_keywords["keyword"].tolist() if not top_keywords.empty else MAIN_KEYWORDS
-    selected_kw = st.selectbox("분석할 키워드 선택", keyword_options, key="keyword_page_select")
+    # -----------------------------------------------------
+    # 1) 전체 기간 vs 최신일 키워드 비교
+    # -----------------------------------------------------
+    section("핵심 키워드 순위 비교", "전체 기간과 최신일 기준 키워드 순위를 비교해 현재 이슈가 누적형인지, 최근 급부상형인지 확인합니다.")
+
+    all_keyword_rank = keyword_counts(df, MAIN_KEYWORDS).head(15)
+    latest_keyword_rank = keyword_counts(latest_df, MAIN_KEYWORDS).head(15)
+
+    rank_col1, rank_col2 = st.columns(2)
+
+    with rank_col1:
+        keyword_chip_grid(
+            all_keyword_rank.head(10),
+            "keyword",
+            "count",
+            "전체 기간 핵심 키워드 TOP 10",
+            top_n=10
+        )
+
+    with rank_col2:
+        keyword_chip_grid(
+            latest_keyword_rank.head(10),
+            "keyword",
+            "count",
+            f"최신일 핵심 키워드 TOP 10 ({latest_date})",
+            top_n=10
+        )
+
+    # -----------------------------------------------------
+    # 2) 키워드 선택
+    # -----------------------------------------------------
+    keyword_options = all_keyword_rank["keyword"].tolist() if not all_keyword_rank.empty else MAIN_KEYWORDS
+    selected_kw = st.selectbox("심층 분석할 키워드 선택", keyword_options, key="keyword_page_select")
 
     selected_articles = filter_keyword(df, selected_kw)
+    latest_selected = filter_keyword(latest_df, selected_kw)
 
-    k1, k2, k3 = st.columns(3)
+    # 선택 키워드 일별 집계
+    selected_daily = (
+        selected_articles.groupby(DATE_COL)
+        .size()
+        .reset_index(name="count")
+        .sort_values(DATE_COL)
+    ) if not selected_articles.empty else pd.DataFrame(columns=[DATE_COL, "count"])
+
+    selected_total = len(selected_articles)
+    selected_today = len(latest_selected)
+    selected_active_days = selected_daily[DATE_COL].nunique() if not selected_daily.empty else 0
+
+    if not selected_daily.empty:
+        selected_peak_row = selected_daily.sort_values("count", ascending=False).iloc[0]
+        selected_peak_date = selected_peak_row[DATE_COL]
+        selected_peak_count = int(selected_peak_row["count"])
+    else:
+        selected_peak_date = "-"
+        selected_peak_count = 0
+
+    # 전일 대비 변화량 계산
+    sorted_dates = sorted(df[DATE_COL].dropna().unique())
+    prev_date = None
+    if latest_date in sorted_dates:
+        latest_idx = sorted_dates.index(latest_date)
+        if latest_idx > 0:
+            prev_date = sorted_dates[latest_idx - 1]
+
+    prev_count = 0
+    if prev_date:
+        prev_count = len(filter_keyword(df[df[DATE_COL] == prev_date], selected_kw))
+
+    diff_count = selected_today - prev_count
+    if prev_count > 0:
+        diff_rate = round(diff_count / prev_count * 100, 1)
+        diff_text = f"{diff_count:+,}건 / {diff_rate:+.1f}%"
+    elif selected_today > 0:
+        diff_text = "NEW"
+    else:
+        diff_text = "0건"
+
+    # 트렌드 유형 가져오기
+    trend_type = "관찰형"
+    trend_reason = "선택 키워드가 전체 기간에서 제한적으로 관찰되는 흐름입니다."
+    if not surge_df.empty and selected_kw in surge_df["keyword"].values:
+        trend_row = surge_df[surge_df["keyword"] == selected_kw].iloc[0]
+        trend_type = trend_row["trend_type"]
+        if trend_type == "지속형":
+            trend_reason = "여러 날짜에 반복적으로 등장해 장기 관심 이슈로 볼 수 있습니다."
+        elif trend_type == "급등형":
+            trend_reason = "특정 시점에서 전일 대비 증가율이 크게 나타난 이슈입니다."
+        elif trend_type == "이벤트형":
+            trend_reason = "짧은 기간에 집중적으로 등장해 행사·발표·사고성 이슈일 가능성이 있습니다."
+        else:
+            trend_reason = "뚜렷한 급등이나 장기 지속보다는 관찰 가능한 보조 이슈입니다."
+
+    # 관련 주제 추정
+    related_topics = []
+    for topic, kws in TOPIC_MAP.items():
+        if selected_kw in kws or len(filter_keywords(selected_articles, kws)) > 0:
+            related_topics.append(topic)
+    related_topic_text = ", ".join(related_topics[:3]) if related_topics else "직접 매칭 주제 없음"
+
+    # -----------------------------------------------------
+    # 3) 선택 키워드 심층 카드
+    # -----------------------------------------------------
+    section(f"'{selected_kw}' 키워드 심층 분석", "선택한 키워드의 전체 언급량, 최신 변화, 집중 날짜, 트렌드 유형을 요약합니다.")
+
+    k1, k2, k3, k4 = st.columns(4)
     with k1:
-        card("선택 키워드", selected_kw, "현재 분석 기준 키워드")
+        card("전체 언급량", f"{selected_total:,}건", "전체 분석 기간 기준")
     with k2:
-        card("관련 기사 수", f"{len(selected_articles):,}건", "전체 기간 기준")
+        card("최신일 언급량", f"{selected_today:,}건", f"{latest_date} 기준")
     with k3:
-        latest_selected = filter_keyword(latest_df, selected_kw)
-        card("오늘 관련 기사", f"{len(latest_selected):,}건", f"{latest_date} 기준")
+        card("등장 일수", f"{selected_active_days:,}일", "해당 키워드가 등장한 날짜 수")
+    with k4:
+        card("최고 집중일", str(selected_peak_date), f"{selected_peak_count:,}건 언급", "#eab308")
 
-    section("TF-IDF 기반 주요 IT 키워드", "IT 키워드 후보군 안에서 중요도를 계산합니다.")
-    tfidf_df = tfidf_keywords(latest_df, 20)
-    st.dataframe(tfidf_df, use_container_width=True)
-    if not tfidf_df.empty:
-        progress_list(tfidf_df.head(10), "keyword", "article_count", "TF-IDF 기반 주요 IT 키워드 TOP 10")
+    k5, k6, k7 = st.columns(3)
+    with k5:
+        card("전일 대비 변화", diff_text, f"비교 기준: {prev_date if prev_date else '전일 데이터 없음'}", "#ef4444" if diff_count > 0 else "#38bdf8")
+    with k6:
+        card("트렌드 유형", trend_type, trend_reason)
+    with k7:
+        card("관련 주제", related_topic_text, "TOPIC_MAP 기준 연결 주제")
 
-    section(f"'{selected_kw}' 관련 기사")
+    # -----------------------------------------------------
+    # 4) 선택 키워드 일별 추이
+    # -----------------------------------------------------
+    section(f"'{selected_kw}' 일별 언급 추이", "선택 키워드가 어느 날짜에 집중되었는지 확인합니다.")
+
+    if selected_daily.empty:
+        st.warning("선택한 키워드의 일별 데이터가 없습니다.")
+    else:
+        chart_df = selected_daily.rename(columns={DATE_COL: "date"}).set_index("date")
+        st.line_chart(chart_df["count"])
+
+        progress_list(
+            selected_daily.sort_values("count", ascending=False).head(10),
+            DATE_COL,
+            "count",
+            f"'{selected_kw}' 언급량이 높았던 날짜 TOP 10",
+            top_n=10
+        )
+
+    # -----------------------------------------------------
+    # 5) 데이터 기반 키워드 중요도
+    # -----------------------------------------------------
+    section("데이터 기반 핵심 키워드 중요도", "미리 정의한 IT 후보 키워드 안에서 기사 등장 빈도와 중요도를 함께 계산합니다.")
+
+    tfidf_df = tfidf_keywords(df, 25)
+    if tfidf_df.empty:
+        st.warning("키워드 중요도 데이터를 생성할 수 없습니다.")
+    else:
+        t1, t2 = st.columns([1, 1])
+        with t1:
+            progress_list(
+                tfidf_df.head(10),
+                "keyword",
+                "article_count",
+                "기사 등장 수 기준 TOP 10",
+                top_n=10
+            )
+        with t2:
+            st.dataframe(tfidf_df, use_container_width=True)
+
+    # -----------------------------------------------------
+    # 6) 자동 해석 인사이트
+    # -----------------------------------------------------
+    section("자동 해석 인사이트")
+
+    if selected_total == 0:
+        insight_text = f"'{selected_kw}' 키워드는 현재 분석 기간에서 뚜렷하게 확인되지 않았습니다."
+    else:
+        if trend_type == "지속형":
+            trend_comment = "기간 전반에 걸쳐 꾸준히 등장했기 때문에, 일시적 이슈보다는 지속 관심 주제로 해석할 수 있습니다."
+        elif trend_type == "급등형":
+            trend_comment = "특정 날짜를 기준으로 언급량이 크게 증가했기 때문에, 발표·사건·정책 변화 등 외부 이벤트와 연결해 해석할 필요가 있습니다."
+        elif trend_type == "이벤트형":
+            trend_comment = "등장 기간은 짧지만 특정 날짜에 집중되어, 단발성 이슈나 행사성 이슈일 가능성이 있습니다."
+        else:
+            trend_comment = "전체 기간에서 보조적으로 관찰되는 키워드이며, 다른 주요 키워드와 함께 해석하는 것이 적절합니다."
+
+        insight_text = f"""
+        '{selected_kw}' 키워드는 전체 기간 동안 총 {selected_total:,}건 등장했으며, {selected_active_days:,}일 동안 관찰되었습니다.
+
+        가장 집중된 날짜는 {selected_peak_date}로, 해당 날짜에 {selected_peak_count:,}건이 확인되었습니다.
+
+        최신일 기준 언급량은 {selected_today:,}건이며, 전일 대비 변화는 {diff_text}입니다.
+
+        이 키워드는 '{trend_type}' 흐름으로 분류되며, {trend_comment}
+        """
+
+    st.info(insight_text)
+
+    # -----------------------------------------------------
+    # 7) 관련 기사 근거
+    # -----------------------------------------------------
+    section(f"'{selected_kw}' 관련 기사 근거", "키워드 분석의 근거가 되는 실제 기사 목록입니다.")
     article_table(selected_articles, DATE_COL)
 
-    section(f"'{selected_kw}'와 유사한 기사", "TF-IDF 벡터 간 코사인 유사도 기반입니다.")
-    st.dataframe(similar_articles(df, selected_kw), use_container_width=True)
+    with st.expander(f"'{selected_kw}'와 유사도가 높은 기사 보기"):
+        st.caption("TF-IDF 벡터 간 코사인 유사도 기준으로 선택 키워드와 가까운 기사를 확인합니다.")
+        st.dataframe(similar_articles(df, selected_kw), use_container_width=True)
 
 with tab_trend:
     st.subheader("시기별 IT 뉴스 트렌드 분석")
