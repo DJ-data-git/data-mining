@@ -1,0 +1,740 @@
+import os
+import json
+import csv
+import io
+import re
+import html
+import urllib.parse
+from datetime import datetime, timezone, timedelta
+from email.utils import parsedate_to_datetime
+
+import boto3
+from botocore.exceptions import ClientError
+
+s3 = boto3.client("s3")
+lambda_client = boto3.client("lambda")
+
+# =========================================================
+# 기본 설정
+# =========================================================
+
+PREFIX = os.environ.get("PREFIX", "it_news")
+CATEGORY_FOLDER = os.environ.get("CATEGORY_FOLDER", "IT")
+BUCKET_NAME = os.environ.get("BUCKET_NAME")
+
+KST = timezone(timedelta(hours=9))
+
+# raw 원본 시작일
+DEFAULT_START_DATE = "20260514"
+
+# 자기 자신 호출용. 비워두면 context.function_name 사용.
+SELF_FUNCTION_NAME = os.environ.get("SELF_FUNCTION_NAME", "")
+
+# 하루 raw 파일 최대 처리 수
+MAX_RAW_FILES_PER_RUN = int(os.environ.get("MAX_RAW_FILES_PER_RUN", "10000"))
+
+
+# =========================================================
+# 불용어 / 키워드 사전
+# =========================================================
+
+EN_STOPWORDS = {
+    "the", "and", "for", "that", "with", "this", "from", "have", "will", "into", "about",
+    "their", "they", "them", "were", "been", "being", "said", "more", "than", "over",
+    "after", "before", "while", "where", "when", "what", "which", "would", "could", "should",
+    "there", "these", "those", "because", "through", "during", "under", "between", "among",
+    "it", "to", "of", "in", "is", "on", "at", "by", "be", "as", "an", "or", "if", "we",
+    "he", "she", "you", "are", "was", "has", "had", "can", "not", "also", "but", "how",
+    "may", "assumed", "errors", "translation", "translated"
+}
+
+KO_STOPWORDS = {
+    "있다", "했다", "한다", "대한", "통해", "위해", "관련", "기자", "지난", "이번", "오늘",
+    "내일", "올해", "최근", "현재", "가운데", "따르면", "등", "및", "것", "수", "중",
+    "전", "후", "명", "일", "월", "년", "개", "곳", "때", "그", "이", "저", "있는",
+    "한다는", "했다는", "밝혔다", "설명했다", "말했다", "뉴스", "기사", "보도"
+}
+
+IT_KEYWORDS = {
+    "AI", "인공지능", "생성형AI", "생성형 AI", "LLM", "챗GPT", "ChatGPT", "GPT", "OpenAI",
+    "반도체", "AI반도체", "AI 반도체", "HBM", "GPU", "엔비디아", "NVIDIA",
+    "삼성전자", "SK하이닉스", "파운드리", "메모리", "칩",
+    "클라우드", "AWS", "Azure", "데이터센터", "데이터 센터", "서버", "인프라", "SaaS",
+    "쿠버네티스", "Kubernetes",
+    "보안", "해킹", "개인정보", "랜섬웨어", "침해", "취약점", "사이버", "정보보호",
+    "로봇", "전기차", "배터리", "자율주행", "모빌리티", "이차전지",
+    "네이버", "카카오", "구글", "애플", "메타", "마이크로소프트", "MS",
+    "플랫폼", "빅테크", "데이터", "빅데이터", "소프트웨어", "디지털", "DX", "핀테크",
+    "블록체인", "가상자산", "메타버스", "ICT"
+}
+
+EVENT_KEYWORDS = {
+    "월드IT쇼": "월드IT쇼",
+    "World IT Show": "월드IT쇼",
+    "WIS": "월드IT쇼",
+    "CES": "CES",
+    "MWC": "MWC",
+    "컨퍼런스": "컨퍼런스/행사",
+    "박람회": "박람회/행사",
+    "전시회": "전시회/행사",
+    "행사": "행사"
+}
+
+
+# =========================================================
+# 텍스트 정제
+# =========================================================
+
+def clean_html(text):
+    if not text:
+        return ""
+
+    text = str(text)
+    text = html.unescape(text)
+    text = re.sub(r"<.*?>", " ", text)
+    text = re.sub(r"\[.*?\]", " ", text)
+    text = re.sub(r"\(.*?\)", " ", text)
+    text = text.replace("'", "").replace('"', "").replace(",", " ")
+    text = re.sub(r"&[a-zA-Z]+;", " ", text)
+    text = re.sub(r"[^가-힣A-Za-z0-9\s./:%+-]", " ", text)
+    text = re.sub(r"\s+", " ", text).strip()
+
+    return text
+
+
+def remove_stopwords(text):
+    if not text:
+        return ""
+
+    tokens = re.findall(r"[가-힣A-Za-z0-9]+", text)
+    cleaned = []
+
+    for token in tokens:
+        lower = token.lower()
+
+        if lower in EN_STOPWORDS:
+            continue
+        if token in KO_STOPWORDS:
+            continue
+        if len(token) <= 1:
+            continue
+
+        cleaned.append(token)
+
+    return " ".join(cleaned)
+
+
+def find_it_keywords(text):
+    """
+    IT 키워드 매칭 함수.
+
+    개선 사항:
+    - "IT" 단독 키워드는 오탐이 너무 많아 IT_KEYWORDS에서 제거함.
+    - AI, MS, DX, ICT, GPT, AWS 같은 짧은 영문 키워드는 단어 경계 기준으로만 매칭함.
+      예: it / within / digital 같은 일반 영어 단어가 IT로 잘못 잡히는 문제 방지.
+    - 한글/복합 키워드는 기존처럼 부분 포함 방식으로 매칭함.
+    """
+    if not text:
+        return []
+
+    matched = []
+    lower_text = text.lower()
+
+    for kw in IT_KEYWORDS:
+        kw_str = str(kw).strip()
+        if not kw_str:
+            continue
+
+        # 영문/숫자만 있는 키워드는 단어 경계 기준으로 매칭
+        if re.fullmatch(r"[A-Za-z0-9.+#-]+", kw_str):
+            pattern = rf"(?<![A-Za-z0-9]){re.escape(kw_str)}(?![A-Za-z0-9])"
+            if re.search(pattern, text, flags=re.IGNORECASE):
+                matched.append(kw_str)
+        else:
+            # 한글 또는 공백 포함 복합어는 기존 방식 유지
+            if kw_str.lower() in lower_text:
+                matched.append(kw_str)
+
+    return sorted(set(matched))
+
+
+def detect_event_tag(text):
+    lower_text = text.lower()
+    tags = []
+
+    for kw, tag in EVENT_KEYWORDS.items():
+        if kw.lower() in lower_text:
+            tags.append(tag)
+
+    return ", ".join(sorted(set(tags)))
+
+
+# =========================================================
+# 날짜 처리
+# =========================================================
+
+def normalize_yyyymmdd(value):
+    return str(value).replace("-", "")
+
+
+def today_yyyymmdd():
+    return datetime.now(KST).strftime("%Y%m%d")
+
+
+def next_yyyymmdd(yyyymmdd):
+    dt = datetime.strptime(yyyymmdd, "%Y%m%d").date()
+    return (dt + timedelta(days=1)).strftime("%Y%m%d")
+
+
+def format_pubdate_dt(date_str):
+    """
+    기사 원문 pubDate를 KST datetime 문자열로 변환.
+    단, processed 파일명은 이 날짜가 아니라 raw 폴더 날짜 기준으로 생성한다.
+    """
+    try:
+        dt = parsedate_to_datetime(date_str)
+
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=KST)
+
+        dt = dt.astimezone(KST)
+
+        return dt.strftime("%Y-%m-%d %H:%M:%S")
+
+    except Exception:
+        return ""
+
+
+def normalize_pubdate_dt(item):
+    if item.get("pubDate_dt"):
+        return item.get("pubDate_dt")
+
+    if item.get("pubDate"):
+        return format_pubdate_dt(item.get("pubDate"))
+
+    if item.get("pubDate_ymd"):
+        try:
+            dt = datetime.strptime(item.get("pubDate_ymd"), "%Y-%m-%d")
+            dt = dt.replace(tzinfo=KST)
+            return dt.strftime("%Y-%m-%d %H:%M:%S")
+        except Exception:
+            return ""
+
+    return ""
+
+
+def yyyymmdd_to_raw_date_path(yyyymmdd):
+    return f"{yyyymmdd[0:4]}/{yyyymmdd[4:6]}/{yyyymmdd[6:8]}"
+
+
+def yyyymmdd_to_date_str(yyyymmdd):
+    return f"{yyyymmdd[0:4]}-{yyyymmdd[4:6]}-{yyyymmdd[6:8]}"
+
+
+# =========================================================
+# 파싱
+# =========================================================
+
+def get_source_name_from_key(raw_key):
+    filename = raw_key.split("/")[-1]
+
+    if filename.startswith("google_"):
+        parts = filename.split("_")
+
+        if len(parts) >= 2:
+            return f"{parts[0]}_{parts[1]}"
+
+    return filename.split("_")[0]
+
+
+def parse_collector_json(raw_data, fallback_source, collect_date_yyyymmdd):
+    """
+    raw JSON 안의 기사를 파싱한다.
+    핵심:
+    - 기사 원문 pubDate는 pubDate_dt로 보존
+    - 분석 기준 날짜/파일 생성 날짜는 raw 폴더 날짜인 collect_date_yyyymmdd 사용
+    """
+
+    if isinstance(raw_data, dict):
+        raw_items = raw_data.get("items", [])
+    elif isinstance(raw_data, list):
+        raw_items = raw_data
+    else:
+        raw_items = []
+
+    items = []
+
+    collect_date = yyyymmdd_to_date_str(collect_date_yyyymmdd)
+
+    for item in raw_items:
+        title = clean_html(item.get("title", ""))
+        description = clean_html(item.get("description", ""))
+
+        combined_text = f"{title} {description}".strip()
+        clean_text_for_analysis = remove_stopwords(combined_text)
+
+        matched_keywords = find_it_keywords(combined_text)
+
+        # 비IT 기사는 processed 저장 대상에서 제외
+        if not matched_keywords:
+            continue
+
+        # 원문 발행일은 참고용으로만 저장
+        pubdate_dt = normalize_pubdate_dt(item)
+
+        # pubDate가 없거나 이상해도 raw 수집 날짜를 기준으로 분석 가능하게 유지
+        if not pubdate_dt:
+            pubdate_dt = f"{collect_date} 00:00:00"
+
+        originallink = item.get("originallink", "")
+        link = item.get("link", "")
+
+        source = item.get("source") or fallback_source
+        source_group = item.get("source_group", "")
+        media_domain = item.get("media_domain", "")
+
+        dedup_key = (
+            item.get("dedup_key")
+            or originallink
+            or link
+            or f"{title}_{collect_date_yyyymmdd}_{media_domain}"
+        )
+
+        items.append({
+            "source": source,
+            "source_group": source_group,
+            "media_domain": media_domain,
+            "title": title,
+            "originallink": originallink,
+            "link": link,
+            "description": description,
+            "clean_text": clean_text_for_analysis,
+
+            # 원문 기사 발행 시각
+            "pubDate_dt": pubdate_dt,
+            "pubDate_ymd": pubdate_dt[:10],
+
+            # 대시보드/시기별 분석 기준 날짜: raw 수집 날짜
+            "collection_date": collect_date,
+            "analysis_date": collect_date,
+            "analysis_hour": "",
+
+            "is_it_news": True,
+            "matched_it_keywords": ", ".join(matched_keywords),
+            "event_tag": detect_event_tag(combined_text),
+            "dedup_key": dedup_key
+        })
+
+    return items
+
+
+# =========================================================
+# S3
+# =========================================================
+
+def compact_item_for_output(item):
+    """
+    Streamlit 분석에 필요한 컬럼만 저장해 S3 파일 크기를 줄인다.
+    dedup_key, clean_text, matched_it_keywords 등은 처리 중에만 사용하고 저장하지 않는다.
+    """
+    output_columns = [
+        "source",
+        "source_group",
+        "title",
+        "description",
+        "originallink",
+        "link",
+        "pubDate_dt",
+        "pubDate_ymd",
+        "analysis_date",
+        "event_tag"
+    ]
+
+    return {col: item.get(col, "") for col in output_columns}
+
+
+def save_json(bucket_name, key, items):
+    compact_items = [compact_item_for_output(item) for item in items]
+
+    s3.put_object(
+        Bucket=bucket_name,
+        Key=key,
+        Body=json.dumps(compact_items, ensure_ascii=False, indent=2).encode("utf-8"),
+        ContentType="application/json; charset=utf-8"
+    )
+
+
+def save_csv(bucket_name, key, items):
+    output = io.StringIO()
+    writer = csv.writer(output)
+
+    # Streamlit 대시보드에서 실제 사용하는 컬럼 중심으로 최소화
+    # - source/source_group/title/description/originallink/link: 기사 표시 및 소스 분석
+    # - pubDate_dt/pubDate_ymd/analysis_date: 날짜/시기별 분석
+    # - event_tag: 이벤트성 기사 확인용 보조 컬럼
+    columns = [
+        "source",
+        "source_group",
+        "title",
+        "description",
+        "originallink",
+        "link",
+        "pubDate_dt",
+        "pubDate_ymd",
+        "analysis_date",
+        "event_tag"
+    ]
+
+    writer.writerow(columns)
+
+    for item in items:
+        writer.writerow([item.get(col, "") for col in columns])
+
+    s3.put_object(
+        Bucket=bucket_name,
+        Key=key,
+        Body=output.getvalue().encode("utf-8-sig"),
+        ContentType="text/csv; charset=utf-8"
+    )
+
+
+def list_raw_json_keys_for_date(bucket_name, yyyymmdd):
+    date_path = yyyymmdd_to_raw_date_path(yyyymmdd)
+
+    raw_prefix = (
+        f"{PREFIX}/"
+        f"{CATEGORY_FOLDER}/"
+        f"raw/"
+        f"{date_path}/"
+    )
+
+    keys = []
+    token = None
+
+    while True:
+        params = {
+            "Bucket": bucket_name,
+            "Prefix": raw_prefix
+        }
+
+        if token:
+            params["ContinuationToken"] = token
+
+        response = s3.list_objects_v2(**params)
+
+        for obj in response.get("Contents", []):
+            key = obj["Key"]
+
+            if key.endswith(".json"):
+                keys.append({
+                    "bucket": bucket_name,
+                    "key": key
+                })
+
+        if not response.get("IsTruncated"):
+            break
+
+        token = response.get("NextContinuationToken")
+
+    return sorted(keys, key=lambda x: x["key"])
+
+
+def get_raw_keys_from_s3_event(event):
+    keys = []
+
+    for record in event.get("Records", []):
+        bucket_name = record["s3"]["bucket"]["name"]
+        raw_key = urllib.parse.unquote_plus(record["s3"]["object"]["key"])
+
+        if (
+            raw_key.startswith(f"{PREFIX}/{CATEGORY_FOLDER}/raw/")
+            and raw_key.endswith(".json")
+        ):
+            keys.append({
+                "bucket": bucket_name,
+                "key": raw_key
+            })
+
+    return keys
+
+
+def extract_collect_date_from_raw_key(raw_key):
+    """
+    raw key 예:
+    it_news/IT/raw/2026/05/14/15/all_20260514_150000.json
+    → 20260514
+    """
+    pattern = rf"{PREFIX}/{CATEGORY_FOLDER}/raw/(\d{{4}})/(\d{{2}})/(\d{{2}})/"
+    m = re.search(pattern, raw_key)
+
+    if not m:
+        return today_yyyymmdd()
+
+    return f"{m.group(1)}{m.group(2)}{m.group(3)}"
+
+
+# =========================================================
+# 처리
+# =========================================================
+
+def read_raw_file(bucket_name, raw_key, collect_date_yyyymmdd):
+    response = s3.get_object(Bucket=bucket_name, Key=raw_key)
+    raw_content = response["Body"].read()
+    source_name = get_source_name_from_key(raw_key)
+
+    raw_data = json.loads(raw_content.decode("utf-8"))
+
+    return parse_collector_json(raw_data, source_name, collect_date_yyyymmdd)
+
+
+def merge_dedup_items(items):
+    dedup_dict = {}
+
+    for item in items:
+        key = (
+            item.get("dedup_key")
+            or item.get("originallink")
+            or item.get("link")
+            or item.get("title")
+        )
+
+        if not key:
+            continue
+
+        dedup_dict[key] = item
+
+    final_items = list(dedup_dict.values())
+
+    final_items.sort(
+        key=lambda x: x.get("pubDate_dt", ""),
+        reverse=True
+    )
+
+    return final_items
+
+
+def save_processed_for_collection_date(bucket_name, yyyymmdd, items):
+    """
+    processed 파일명은 반드시 raw 수집 날짜 기준으로 생성한다.
+    """
+    processed_base = (
+        f"{PREFIX}/"
+        f"{CATEGORY_FOLDER}/"
+        f"processed/"
+        f"news_final_{yyyymmdd}"
+    )
+
+    final_json_key = f"{processed_base}.json"
+    final_csv_key = f"{processed_base}.csv"
+
+    final_items = merge_dedup_items(items)
+
+    save_json(bucket_name, final_json_key, final_items)
+    save_csv(bucket_name, final_csv_key, final_items)
+
+    return {
+        "date": yyyymmdd,
+        "json_file": final_json_key,
+        "csv_file": final_csv_key,
+        "total_unique_items": len(final_items)
+    }
+
+
+def rebuild_one_raw_date(bucket_name, target_date):
+    """
+    raw/{YYYY/MM/DD}/ 아래 전체 json을 읽고,
+    raw 수집 날짜 기준으로 processed/news_final_YYYYMMDD 파일 하나를 생성한다.
+    """
+    raw_targets = list_raw_json_keys_for_date(bucket_name, target_date)
+    raw_targets = raw_targets[:MAX_RAW_FILES_PER_RUN]
+
+    print(f"[{target_date}] raw json files to process: {len(raw_targets)}")
+
+    all_items_for_target_date = []
+    parsed_item_count = 0
+    error_count = 0
+    errors = []
+
+    for target in raw_targets:
+        try:
+            parsed_items = read_raw_file(
+                target["bucket"],
+                target["key"],
+                collect_date_yyyymmdd=target_date
+            )
+            parsed_item_count += len(parsed_items)
+            all_items_for_target_date.extend(parsed_items)
+
+        except Exception as e:
+            error_count += 1
+            error_info = {
+                "raw_key": target["key"],
+                "message": str(e)
+            }
+            errors.append(error_info)
+            print(json.dumps(error_info, ensure_ascii=False))
+
+    saved_result = save_processed_for_collection_date(
+        bucket_name,
+        target_date,
+        all_items_for_target_date
+    )
+
+    return {
+        "target_date": target_date,
+        "raw_file_count": len(raw_targets),
+        "parsed_it_item_count_before_dedup": parsed_item_count,
+        "created_processed_files": [saved_result],
+        "error_count": error_count,
+        "errors": errors[:20]
+    }
+
+
+def invoke_next_date_async(function_name, bucket_name, start_date, next_date, end_date):
+    payload = {
+        "mode": "batch_chain",
+        "bucket": bucket_name,
+        "start_date": start_date,
+        "target_date": next_date,
+        "end_date": end_date
+    }
+
+    lambda_client.invoke(
+        FunctionName=function_name,
+        InvocationType="Event",
+        Payload=json.dumps(payload).encode("utf-8")
+    )
+
+
+def process_s3_event_files(raw_targets):
+    """
+    실시간 S3 ObjectCreated 이벤트용.
+    새 raw 파일이 들어오면 raw 수집 날짜 기준 processed 파일에 merge.
+    """
+    results = []
+
+    for target in raw_targets:
+        bucket_name = target["bucket"]
+        raw_key = target["key"]
+        collect_date = extract_collect_date_from_raw_key(raw_key)
+
+        parsed_items = read_raw_file(bucket_name, raw_key, collect_date)
+
+        if not parsed_items:
+            results.append({
+                "raw_key": raw_key,
+                "status": "skipped",
+                "message": "No valid IT items parsed"
+            })
+            continue
+
+        processed_base = (
+            f"{PREFIX}/"
+            f"{CATEGORY_FOLDER}/"
+            f"processed/"
+            f"news_final_{collect_date}"
+        )
+
+        final_json_key = f"{processed_base}.json"
+        final_csv_key = f"{processed_base}.csv"
+
+        try:
+            response = s3.get_object(Bucket=bucket_name, Key=final_json_key)
+            existing_items = json.loads(response["Body"].read().decode("utf-8"))
+        except ClientError as e:
+            if e.response["Error"]["Code"] == "NoSuchKey":
+                existing_items = []
+            else:
+                raise e
+
+        final_items = merge_dedup_items(existing_items + parsed_items)
+
+        save_json(bucket_name, final_json_key, final_items)
+        save_csv(bucket_name, final_csv_key, final_items)
+
+        results.append({
+            "raw_key": raw_key,
+            "status": "processed",
+            "collection_date": collect_date,
+            "new_items": len(parsed_items),
+            "total_unique_items": len(final_items),
+            "json_file": final_json_key,
+            "csv_file": final_csv_key
+        })
+
+    return results
+
+
+# =========================================================
+# Lambda Handler
+# =========================================================
+
+def lambda_handler(event, context):
+    print("Received event:")
+    print(json.dumps(event, ensure_ascii=False))
+
+    bucket_name = event.get("bucket") or BUCKET_NAME
+
+    if not bucket_name:
+        return {
+            "statusCode": 400,
+            "message": "Bucket name is missing. Set BUCKET_NAME env or pass bucket in event."
+        }
+
+    raw_targets = get_raw_keys_from_s3_event(event)
+
+    mode = event.get("mode", "manual_start")
+
+    # S3 ObjectCreated 이벤트는 실시간 머지 처리
+    if raw_targets and mode != "batch_chain":
+        results = process_s3_event_files(raw_targets)
+
+        return {
+            "statusCode": 200,
+            "message": "S3 event preprocessing completed by raw collection date",
+            "mode": "s3_event",
+            "target_count": len(raw_targets),
+            "results": results
+        }
+
+    # 수동 실행 {} 인 경우 무조건 20260514부터 오늘까지 하루씩 체인 처리
+    start_date = normalize_yyyymmdd(event.get("start_date", DEFAULT_START_DATE))
+    end_date = normalize_yyyymmdd(event.get("end_date", today_yyyymmdd()))
+
+    if mode == "batch_chain" and event.get("target_date"):
+        target_date = normalize_yyyymmdd(event.get("target_date"))
+    else:
+        target_date = start_date
+
+    result = rebuild_one_raw_date(bucket_name, target_date)
+
+    next_date = next_yyyymmdd(target_date)
+    has_next = next_date <= end_date
+
+    invoked_next = False
+
+    if has_next:
+        function_name = SELF_FUNCTION_NAME or context.function_name
+
+        invoke_next_date_async(
+            function_name=function_name,
+            bucket_name=bucket_name,
+            start_date=start_date,
+            next_date=next_date,
+            end_date=end_date
+        )
+
+        invoked_next = True
+
+    return {
+        "statusCode": 200,
+        "message": "One raw collection date processed. Next date invoked asynchronously." if invoked_next else "Batch chain completed.",
+        "mode": mode,
+        "basis": "raw_collection_date",
+        "start_date": start_date,
+        "target_date": target_date,
+        "end_date": end_date,
+        "next_date": next_date if has_next else None,
+        "invoked_next": invoked_next,
+        **result
+    }
