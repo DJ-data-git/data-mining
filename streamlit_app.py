@@ -1526,6 +1526,8 @@ with tab_risk:
     st.caption("보안·해킹·개인정보 등 부정/리스크 신호를 따로 분리해 확인합니다.")
 
     risk_df = filter_keywords(df, risk_keywords)
+    risk_ratio = round(len(risk_df) / len(df) * 100, 1) if len(df) else 0
+
     latest_risk_df = filter_keywords(latest_df, risk_keywords)
     neg_df = df[df["sentiment_group"] == "부정/리스크"]
 
