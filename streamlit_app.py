@@ -659,7 +659,7 @@ def similar_articles(df, keyword, top_n=10):
     txt = text_series(df).fillna("").astype(str)
     if len(txt) < 2:
         return pd.DataFrame()
-    vec = TfidfVectorizer(max_features=1200, stop_words=STOPWORDS, token_pattern=r"(?u)[가-힣A-Za-z0-9]{2,}")
+    vec = TfidfVectorizer(max_features=1200, stop_words=STOPWORDS, token_pattern=r"(?u)\b[가-힣A-Za-z0-9]{2,}\b")
     try:
         mat = vec.fit_transform(txt.tolist() + [keyword])
         scores = cosine_similarity(mat[:-1], mat[-1]).flatten()
@@ -977,32 +977,203 @@ with tab_home:
 
 with tab_summary:
     st.subheader("트렌드 요약")
-    st.caption("전체 수집 기간의 핵심 키워드, 주제, 급등/지속 트렌드를 한 화면에서 요약합니다.")
+    st.caption("전체 수집 기간의 IT 뉴스 흐름을 핵심 키워드, 지속/급등 트렌드, 기사량 급증일, 자동 해석 인사이트 기준으로 요약합니다.")
 
     min_date = df[DATE_COL].min()
     max_date = df[DATE_COL].max()
     total_days = df[DATE_COL].nunique()
 
-    c1, c2, c3 = st.columns(3)
+    daily_article_count = (
+        df.groupby(DATE_COL)
+        .size()
+        .reset_index(name="article_count")
+        .sort_values("article_count", ascending=False)
+    )
+
+    all_keyword_df = keyword_counts(df, MAIN_KEYWORDS).head(10)
+
+    top_day = daily_article_count.iloc[0][DATE_COL] if not daily_article_count.empty else "-"
+    top_day_count = int(daily_article_count.iloc[0]["article_count"]) if not daily_article_count.empty else 0
+
+    top_keyword = all_keyword_df.iloc[0]["keyword"] if not all_keyword_df.empty else "-"
+    top_keyword_count = int(all_keyword_df.iloc[0]["count"]) if not all_keyword_df.empty else 0
+
+    if not surge_df.empty:
+        sustained_df = surge_df[surge_df["trend_type"] == "지속형"].sort_values("total_count", ascending=False)
+        surged_df = surge_df[surge_df["trend_type"] == "급등형"].sort_values("max_growth_rate", ascending=False)
+        event_df = surge_df[surge_df["trend_type"] == "이벤트형"].sort_values("max_count", ascending=False)
+        observation_df = surge_df[surge_df["trend_type"] == "관찰형"].sort_values("total_count", ascending=False)
+    else:
+        sustained_df = pd.DataFrame()
+        surged_df = pd.DataFrame()
+        event_df = pd.DataFrame()
+        observation_df = pd.DataFrame()
+
+    sustained_kw = sustained_df.iloc[0]["keyword"] if not sustained_df.empty else "-"
+    surged_kw = surged_df.iloc[0]["keyword"] if not surged_df.empty else "-"
+    event_kw = event_df.iloc[0]["keyword"] if not event_df.empty else "-"
+
+    c1, c2, c3, c4 = st.columns(4)
     with c1:
         card("분석 기간", f"{min_date} ~ {max_date}", f"총 {total_days:,}일 기준")
     with c2:
         card("전체 기사 수", f"{len(df):,}건", "S3 processed CSV 기준")
     with c3:
-        card("분석 소스 수", f"{df['analysis_source'].nunique():,}개", "뉴스 수집 출처 기준")
+        card("최다 언급 키워드", top_keyword, f"{top_keyword_count:,}건 언급")
+    with c4:
+        card("기사량 최다 날짜", top_day, f"{top_day_count:,}건 수집")
 
-    section("전체 기간 주요 키워드")
-    all_keyword_df = keyword_counts(df, MAIN_KEYWORDS).head(10)
+    section("전체 기간 핵심 키워드 TOP 10", "전체 수집 기간에서 반복적으로 많이 등장한 IT 키워드입니다.")
     keyword_chip_grid(all_keyword_df, "keyword", "count", None)
 
-    section("트렌드 유형 요약")
-    if surge_df.empty:
-        st.warning("급등/지속 트렌드 분석 데이터가 없습니다.")
+    section("트렌드 유형별 핵심 키워드", "단순 빈도가 아니라 등장 일수와 증가율을 함께 반영해 키워드 성격을 분류합니다.")
+
+    t1, t2, t3 = st.columns(3)
+
+    with t1:
+        card(
+            "지속형 대표 키워드",
+            sustained_kw,
+            "여러 날짜에 반복적으로 등장한 장기 관심 이슈",
+            "#22c55e"
+        )
+        if not sustained_df.empty:
+            progress_list(
+                sustained_df.head(5),
+                "keyword",
+                "total_count",
+                "지속형 키워드 TOP 5",
+                top_n=5
+            )
+        else:
+            st.warning("지속형 키워드가 없습니다.")
+
+    with t2:
+        card(
+            "급등형 대표 키워드",
+            surged_kw,
+            "전일 대비 증가율이 크게 나타난 단기 이슈",
+            "#ef4444"
+        )
+        if not surged_df.empty:
+            progress_list(
+                surged_df.head(5),
+                "keyword",
+                "max_growth_rate",
+                "급등형 키워드 TOP 5",
+                top_n=5,
+                suffix="%"
+            )
+        else:
+            st.warning("급등형 키워드가 없습니다.")
+
+    with t3:
+        card(
+            "이벤트형 대표 키워드",
+            event_kw,
+            "특정 날짜에 집중적으로 등장한 이벤트성 이슈",
+            "#eab308"
+        )
+        if not event_df.empty:
+            progress_list(
+                event_df.head(5),
+                "keyword",
+                "max_count",
+                "이벤트형 키워드 TOP 5",
+                top_n=5
+            )
+        else:
+            st.warning("이벤트형 키워드가 없습니다.")
+
+    section("기사량 급증 날짜 TOP 5", "수집 기간 중 기사량이 가장 많았던 날짜를 기준으로 주요 이슈 발생 구간을 확인합니다.")
+
+    if not daily_article_count.empty:
+        progress_list(
+            daily_article_count.head(5),
+            DATE_COL,
+            "article_count",
+            "기사량이 많았던 날짜",
+            top_n=5
+        )
+        st.dataframe(daily_article_count.head(10), use_container_width=True)
     else:
-        type_count = surge_df["trend_type"].value_counts().reset_index()
-        type_count.columns = ["trend_type", "count"]
-        progress_list(type_count, "trend_type", "count", "트렌드 유형별 키워드 수", top_n=10, suffix="개")
-        st.dataframe(surge_df, use_container_width=True)
+        st.warning("일별 기사량 데이터가 없습니다.")
+
+    section("주제별 흐름 요약", "AI, 반도체, 클라우드, 보안 등 주요 주제가 기간 중 어떻게 분포했는지 확인합니다.")
+
+    topic_total_df = topic_counts(df)
+    if not topic_total_df.empty:
+        progress_list(topic_total_df, "topic", "count", "전체 기간 주제별 기사 수", top_n=6)
+        st.dataframe(topic_total_df, use_container_width=True)
+    else:
+        st.warning("주제별 분석 데이터가 없습니다.")
+
+    section("자동 해석 인사이트")
+
+    if not all_keyword_df.empty:
+        top3_keywords = ", ".join(all_keyword_df.head(3)["keyword"].astype(str).tolist())
+    else:
+        top3_keywords = "-"
+
+    if not topic_total_df.empty:
+        top_topic = topic_total_df.iloc[0]["topic"]
+        top_topic_count = int(topic_total_df.iloc[0]["count"])
+    else:
+        top_topic = "-"
+        top_topic_count = 0
+
+    insight_1 = f"전체 기간 중 가장 많이 언급된 키워드는 '{top_keyword}'이며, 총 {top_keyword_count:,}건의 기사에서 확인되었습니다. 주요 상위 키워드는 {top3_keywords}입니다."
+    insight_2 = f"기사량이 가장 많았던 날짜는 {top_day}로, 해당 날짜에는 총 {top_day_count:,}건의 기사가 수집되었습니다."
+    insight_3 = f"주제 기준으로는 '{top_topic}' 관련 기사가 {top_topic_count:,}건으로 가장 높게 나타났습니다."
+    insight_4 = f"트렌드 유형 기준으로는 지속형 '{sustained_kw}', 급등형 '{surged_kw}', 이벤트형 '{event_kw}'가 대표적으로 나타났습니다."
+
+    st.info(
+        f"""
+        {insight_1}
+
+        {insight_2}
+
+        {insight_3}
+
+        {insight_4}
+
+        따라서 이번 수집 기간의 IT 뉴스 흐름은 단순한 기사량 집계가 아니라, 반복적으로 등장한 장기 이슈와 특정 시점에 급증한 이벤트성 이슈가 함께 나타난 구조로 해석할 수 있습니다.
+        """
+    )
+
+    section("트렌드 상세 데이터")
+
+    detail_tabs = st.tabs(["지속형", "급등형", "이벤트형", "관찰형", "전체"])
+
+    with detail_tabs[0]:
+        if sustained_df.empty:
+            st.warning("지속형 데이터가 없습니다.")
+        else:
+            st.dataframe(sustained_df, use_container_width=True)
+
+    with detail_tabs[1]:
+        if surged_df.empty:
+            st.warning("급등형 데이터가 없습니다.")
+        else:
+            st.dataframe(surged_df, use_container_width=True)
+
+    with detail_tabs[2]:
+        if event_df.empty:
+            st.warning("이벤트형 데이터가 없습니다.")
+        else:
+            st.dataframe(event_df, use_container_width=True)
+
+    with detail_tabs[3]:
+        if observation_df.empty:
+            st.warning("관찰형 데이터가 없습니다.")
+        else:
+            st.dataframe(observation_df, use_container_width=True)
+
+    with detail_tabs[4]:
+        if surge_df.empty:
+            st.warning("급등/지속 트렌드 분석 데이터가 없습니다.")
+        else:
+            st.dataframe(surge_df, use_container_width=True)
 
 
 with tab_keyword:
