@@ -9,50 +9,66 @@ import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
 from pyvis.network import Network
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
 
 # =========================================================
 # Page / Style
 # =========================================================
 
-st.set_page_config(page_title="IT 뉴스 분석 대시보드", layout="wide")
+st.set_page_config(page_title="IT 뉴스 트렌드 분석 대시보드", layout="wide")
 
 st.markdown("""
 <style>
 .stApp {background: linear-gradient(135deg,#0f172a 0%,#111827 45%,#020617 100%); color:#e5e7eb;}
-.block-container {padding-top:1.6rem; padding-bottom:3rem;}
-h1 {color:#f8fafc; font-weight:900; letter-spacing:-0.05em;}
-h2,h3 {color:#e5e7eb; font-weight:850;}
+.block-container {padding-top:2rem; padding-bottom:3rem;}
+h1 {color:#e5e7eb; font-weight:900; letter-spacing:-0.05em;}
+h2,h3 {color:#e5e7eb; font-weight:800;}
 [data-testid="stCaptionContainer"] {color:#94a3b8;}
-[data-testid="stDataFrame"] {border-radius:14px; overflow:hidden; border:1px solid rgba(148,163,184,.18);}
+[data-testid="stDataFrame"] {border-radius:16px; overflow:hidden; border:1px solid rgba(148,163,184,.18);}
 .stAlert {background:rgba(14,165,233,.12); border:1px solid rgba(56,189,248,.35); border-radius:16px; color:#e0f2fe;}
+.stButton > button {background:linear-gradient(135deg,#0284c7,#2563eb); color:white; border:0; border-radius:999px; padding:.5rem 1rem; font-weight:700;}
+.stButton > button:hover {background:linear-gradient(135deg,#38bdf8,#2563eb); color:white; border:0;}
+.stTextInput input {background:#020617; color:#e5e7eb; border:1px solid #334155; border-radius:12px;}
 hr {border:none; height:1px; background:linear-gradient(90deg,transparent,#38bdf8,transparent); margin:2rem 0;}
+section[data-testid="stSidebar"] {background:#020617;}
+/* Premium top tab navigation */
 .stTabs [data-baseweb="tab-list"] {
-    gap: 8px;
+    gap: 10px;
     background: rgba(15,23,42,.62);
     border: 1px solid rgba(148,163,184,.16);
     padding: 10px;
-    border-radius: 18px;
+    border-radius: 20px;
+    box-shadow: 0 0 24px rgba(56,189,248,.06);
 }
 .stTabs [data-baseweb="tab"] {
-    height: 44px;
-    border-radius: 13px;
-    padding: 0 14px;
+    height: 46px;
+    border-radius: 14px;
+    padding: 0 18px;
     background: rgba(2,6,23,.45);
     border: 1px solid rgba(148,163,184,.10);
     color: #94a3b8;
     font-weight: 800;
+    letter-spacing: -0.01em;
+}
+.stTabs [data-baseweb="tab"]:hover {
+    background: rgba(30,41,59,.8);
+    color: #e5e7eb;
+    border: 1px solid rgba(56,189,248,.35);
 }
 .stTabs [aria-selected="true"] {
     background: linear-gradient(135deg, rgba(14,165,233,.95), rgba(37,99,235,.92)) !important;
     color: #ffffff !important;
     border: 1px solid rgba(125,211,252,.8) !important;
+    box-shadow: 0 0 20px rgba(56,189,248,.25);
 }
-.stTabs [data-baseweb="tab-highlight"] {display: none;}
+.stTabs [data-baseweb="tab-highlight"] {
+    display: none;
+}
 </style>
 """, unsafe_allow_html=True)
 
-st.title("IT 뉴스 데이터 분석 대시보드")
-st.caption("뉴스 수집 결과를 단순 나열하지 않고, 데이터 품질 검증 → 분석기법 적용 → 결과 해석 → 한계점 확인 순서로 구성했습니다.")
+st.title("IT 뉴스 트렌드 분석 대시보드")
 
 # =========================================================
 # Config
@@ -74,45 +90,47 @@ S3_PREFIX = "it_news/IT/processed/"
 START_DATE = "20260514"
 
 CORE_KEYWORDS = [
-    "AI", "인공지능", "생성형AI", "챗GPT", "ChatGPT", "GPT", "OpenAI", "LLM",
-    "반도체", "AI반도체", "AI 반도체", "HBM", "GPU", "엔비디아", "NVIDIA",
-    "삼성전자", "SK하이닉스", "파운드리", "메모리",
-    "클라우드", "AWS", "Azure", "데이터센터", "데이터 센터", "서버", "인프라",
-    "보안", "해킹", "개인정보", "랜섬웨어", "침해", "취약점", "사이버",
-    "로봇", "전기차", "배터리", "자율주행", "모빌리티",
-    "네이버", "카카오", "구글", "애플", "메타", "마이크로소프트", "MS",
-    "데이터", "빅데이터", "소프트웨어", "디지털", "DX", "핀테크", "블록체인"
+    "AI", "인공지능", "생성형AI", "챗GPT", "반도체", "클라우드", "보안", "데이터",
+    "로봇", "배터리", "전기차", "삼성", "네이버", "카카오", "엔비디아",
+    "AWS", "Azure", "해킹", "개인정보", "데이터센터", "HBM"
 ]
 
+# MAIN_KEYWORDS는 이후 데이터 기반 자동 키워드와 결합해 하이브리드 방식으로 재정의됨
+MAIN_KEYWORDS = CORE_KEYWORDS.copy()
+
 TOPIC_MAP = {
-    "AI/인공지능": ["AI", "인공지능", "생성형AI", "챗GPT", "ChatGPT", "GPT", "OpenAI", "LLM", "엔비디아", "GPU"],
-    "반도체": ["반도체", "AI반도체", "AI 반도체", "HBM", "삼성전자", "SK하이닉스", "파운드리", "메모리", "칩"],
-    "클라우드/인프라": ["클라우드", "AWS", "Azure", "데이터센터", "데이터 센터", "서버", "인프라", "SaaS", "쿠버네티스"],
-    "보안/리스크": ["보안", "해킹", "개인정보", "랜섬웨어", "침해", "취약점", "사이버", "정보보호"],
-    "모빌리티/로봇": ["전기차", "자율주행", "배터리", "로봇", "모빌리티", "이차전지"],
-    "플랫폼/빅테크": ["네이버", "카카오", "구글", "애플", "메타", "마이크로소프트", "MS", "플랫폼", "빅테크"],
+    "AI/인공지능": ["AI", "인공지능", "생성형AI", "챗GPT", "엔비디아"],
+    "반도체": ["반도체", "삼성전자", "SK하이닉스", "칩", "HBM"],
+    "클라우드/데이터센터": ["클라우드", "AWS", "Azure", "데이터센터"],
+    "보안/개인정보": ["보안", "해킹", "개인정보", "랜섬웨어", "침해"],
+    "모빌리티/로봇": ["전기차", "자율주행", "배터리", "로봇"],
+    "플랫폼/빅테크": ["네이버", "카카오", "구글", "애플", "메타"],
 }
 
-EVENT_KEYWORDS = {
-    "월드IT쇼": ["월드IT쇼", "World IT Show", "WIS"],
-    "CES": ["CES"],
-    "MWC": ["MWC"],
-    "전시/컨퍼런스": ["컨퍼런스", "박람회", "전시회", "행사", "세미나", "포럼"]
-}
+IT_TFIDF_CANDIDATES = [
+    "AI", "인공지능", "생성형AI", "생성형 AI", "LLM", "챗GPT", "ChatGPT", "GPT", "OpenAI",
+    "멀티모달", "AI 에이전트", "AI 검색", "AI 서비스",
+    "반도체", "AI반도체", "AI 반도체", "HBM", "GPU", "엔비디아", "NVIDIA",
+    "삼성전자", "SK하이닉스", "파운드리", "메모리", "칩", "첨단 반도체",
+    "클라우드", "AWS", "Azure", "데이터센터", "데이터 센터", "서버", "인프라",
+    "SaaS", "쿠버네티스", "Kubernetes", "클라우드 전환",
+    "보안", "해킹", "개인정보", "랜섬웨어", "침해", "취약점", "사이버 공격",
+    "정보보호", "제로트러스트", "인증", "망분리",
+    "로봇", "전기차", "배터리", "자율주행", "모빌리티", "이차전지", "전장",
+    "네이버", "카카오", "구글", "애플", "메타", "마이크로소프트", "MS",
+    "플랫폼", "빅테크", "검색", "커머스",
+    "데이터", "빅데이터", "소프트웨어", "디지털", "DX", "디지털전환",
+    "핀테크", "블록체인", "가상자산", "메타버스"
+]
 
-POSITIVE_WORDS = ["성장", "확대", "출시", "투자", "협력", "개선", "강화", "수주", "증가", "성공", "최초", "고도화", "혁신", "개발"]
-RISK_WORDS = ["해킹", "침해", "유출", "장애", "중단", "규제", "감소", "적자", "위험", "논란", "피해", "취약점", "공격", "랜섬웨어"]
-
-BAD_TOKENS = ["nbsp", "quot", "amp", "lt", "gt", "may", "assumed", "errors", "said", "the", "and", "for", "to", "in", "is"]
-STOPWORDS = set([
+STOPWORDS = [
     "the", "and", "for", "that", "with", "this", "from", "have", "will", "into", "about",
     "their", "they", "them", "were", "been", "being", "said", "more", "than", "over",
     "after", "before", "while", "where", "when", "what", "which", "would", "could", "should",
     "there", "these", "those", "because", "through", "during", "under", "between", "among",
     "it", "to", "of", "in", "is", "on", "at", "by", "be", "as", "an", "or", "if", "we",
     "he", "she", "you", "are", "was", "has", "had", "can", "not", "also", "but", "how",
-    "뉴스", "기사", "기자", "보도", "관련", "대한", "위해", "통해", "이번", "최근", "오늘", "밝혔다", "말했다"
-])
+]
 
 # =========================================================
 # UI Helpers
@@ -124,26 +142,17 @@ def section(title, subtitle=None):
     if subtitle:
         st.caption(subtitle)
 
+
 def card(title, value, desc="", color="#38bdf8"):
     st.markdown(f"""
     <div style="background:rgba(15,23,42,.82);border:1px solid rgba(56,189,248,.25);
-    border-radius:20px;padding:20px;min-height:138px;box-shadow:0 0 20px rgba(56,189,248,.06);">
-      <div style="color:#94a3b8;font-size:13px;font-weight:750;margin-bottom:8px;">{title}</div>
-      <div style="color:{color};font-size:28px;font-weight:950;margin-bottom:8px;line-height:1.2;">{value}</div>
-      <div style="color:#cbd5e1;font-size:13px;line-height:1.55;">{desc}</div>
+    border-radius:22px;padding:22px;min-height:145px;box-shadow:0 0 24px rgba(56,189,248,.08);">
+      <div style="color:#94a3b8;font-size:14px;font-weight:700;margin-bottom:8px;">{title}</div>
+      <div style="color:{color};font-size:34px;font-weight:900;margin-bottom:8px;">{value}</div>
+      <div style="color:#cbd5e1;font-size:14px;line-height:1.6;">{desc}</div>
     </div>
     """, unsafe_allow_html=True)
 
-def method_box(method, purpose, formula, interpretation):
-    st.markdown(f"""
-    <div style="background:rgba(2,6,23,.72);border:1px solid rgba(148,163,184,.18);
-    border-radius:18px;padding:18px;margin-bottom:12px;">
-      <div style="font-size:18px;font-weight:900;color:#f8fafc;margin-bottom:10px;">분석기법: {method}</div>
-      <div style="color:#cbd5e1;line-height:1.7;"><b>분석 목적</b>: {purpose}</div>
-      <div style="color:#cbd5e1;line-height:1.7;"><b>계산 방식</b>: {formula}</div>
-      <div style="color:#e0f2fe;line-height:1.7;"><b>해석 기준</b>: {interpretation}</div>
-    </div>
-    """, unsafe_allow_html=True)
 
 def progress_list(df, label_col, value_col, title=None, top_n=10, suffix="건"):
     if title:
@@ -154,35 +163,89 @@ def progress_list(df, label_col, value_col, title=None, top_n=10, suffix="건"):
 
     view = df.head(top_n).copy()
     max_v = view[value_col].max()
-    for _, row in view.iterrows():
+    colors = ["#38bdf8", "#60a5fa", "#818cf8", "#22c55e", "#14b8a6", "#eab308", "#f97316", "#ef4444", "#ec4899", "#a855f7"]
+
+    for idx, (_, row) in enumerate(view.iterrows()):
         label, value = row[label_col], float(row[value_col])
         ratio = value / max_v * 100 if max_v else 0
-        value_text = f"{int(value):,}{suffix}" if value == int(value) else f"{value:.2f}{suffix}"
+        color = colors[idx % len(colors)]
+        value_text = f"{int(value):,}{suffix}" if value == int(value) else f"{value:.2f}"
         st.markdown(f"""
-        <div style="background:rgba(15,23,42,.75);border:1px solid rgba(148,163,184,.12);border-radius:16px;
-        padding:13px 16px;margin-bottom:9px;">
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:7px;">
-            <div style="font-size:15px;font-weight:850;color:white;">{label}</div>
-            <div style="font-size:14px;font-weight:850;color:#38bdf8;">{value_text}</div>
+        <div style="background:rgba(15,23,42,.75);border:1px solid rgba(148,163,184,.12);border-radius:18px;
+        padding:14px 18px;margin-bottom:10px;box-shadow:0 0 14px rgba(56,189,248,.04);">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+            <div style="font-size:17px;font-weight:850;color:white;">{label}</div>
+            <div style="font-size:16px;font-weight:850;color:{color};">{value_text}</div>
           </div>
-          <div style="width:100%;height:8px;background:#1e293b;border-radius:999px;overflow:hidden;">
-            <div style="width:{ratio}%;height:100%;background:linear-gradient(90deg,#38bdf8,#60a5fa);border-radius:999px;"></div>
+          <div style="width:100%;height:9px;background:#1e293b;border-radius:999px;overflow:hidden;">
+            <div style="width:{ratio}%;height:100%;background:linear-gradient(90deg,{color},#38bdf8);border-radius:999px;"></div>
           </div>
         </div>
         """, unsafe_allow_html=True)
 
-def insight_box(title, bullets):
-    body = "".join([f"<li>{b}</li>" for b in bullets])
-    st.markdown(f"""
-    <div style="background:rgba(14,165,233,.12);border:1px solid rgba(56,189,248,.35);
-    border-radius:18px;padding:18px;margin:12px 0;">
-      <div style="font-size:18px;font-weight:950;color:#e0f2fe;margin-bottom:8px;">{title}</div>
-      <ul style="color:#dbeafe;line-height:1.75;margin-bottom:0;">{body}</ul>
-    </div>
-    """, unsafe_allow_html=True)
+
+def keyword_chip_grid(df, label_col="keyword", value_col="count", title=None, top_n=10, suffix="건", clickable=False, session_key="drill_keyword"):
+    if title:
+        st.markdown(f"### {title}")
+    if df.empty or label_col not in df.columns or value_col not in df.columns:
+        st.warning("표시할 데이터가 없습니다.")
+        return
+
+    view = df.head(top_n).copy().reset_index(drop=True)
+    max_v = view[value_col].max()
+    colors = ["#38bdf8", "#60a5fa", "#818cf8", "#22c55e", "#14b8a6", "#eab308", "#f97316", "#ef4444", "#ec4899", "#a855f7"]
+
+    for start in range(0, len(view), 5):
+        cols = st.columns(5)
+        for offset, (col, (_, row)) in enumerate(zip(cols, view.iloc[start:start+5].iterrows())):
+            idx = start + offset
+            label = str(row[label_col])
+            value = float(row[value_col])
+            ratio = value / max_v * 100 if max_v else 0
+            color = colors[idx % len(colors)]
+            value_text = f"{int(value):,}{suffix}" if value == int(value) else f"{value:.2f}"
+            with col:
+                st.markdown(f"""
+                <div style="background:rgba(15,23,42,.82);border:1px solid rgba(56,189,248,.22);border-radius:18px;
+                padding:16px 14px;margin-bottom:8px;min-height:112px;box-shadow:0 0 16px rgba(56,189,248,.05);">
+                    <div style="font-size:18px;font-weight:900;color:#e5e7eb;margin-bottom:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+                        {label}
+                    </div>
+                    <div style="font-size:24px;font-weight:950;color:{color};margin-bottom:10px;">
+                        {value_text}
+                    </div>
+                    <div style="width:100%;height:7px;background:#1e293b;border-radius:999px;overflow:hidden;">
+                        <div style="width:{ratio}%;height:100%;background:linear-gradient(90deg,{color},#38bdf8);border-radius:999px;"></div>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+
+                if clickable:
+                    current_selected = st.session_state.get(session_key, "")
+                    button_label = "뉴스 닫기" if current_selected == label else "뉴스 보기"
+
+                    if st.button(button_label, key=f"{session_key}_{idx}_{label}"):
+                        if st.session_state.get(session_key, "") == label:
+                            st.session_state[session_key] = ""
+                        else:
+                            st.session_state[session_key] = label
+
+
+def methodology_cards():
+    methods = [
+        ("TF-IDF", "일반 단어 전체가 아니라 IT 키워드 후보군 안에서 중요도를 계산합니다."),
+        ("Cosine Similarity", "TF-IDF 벡터 간 각도 유사도를 계산해 특정 키워드와 유사한 기사를 찾습니다."),
+        ("Co-occurrence", "같은 기사 안에 함께 등장한 키워드를 분석해 이슈 간 연결 구조를 파악합니다."),
+        ("Sentiment", "성장·투자·혁신 또는 해킹·유출·침해 키워드로 보도 성향을 분류합니다."),
+        ("Time-Series", "날짜별 기사량 변화를 추적해 특정 이슈가 언제 집중되었는지 확인합니다."),
+    ]
+    cols = st.columns(5)
+    for col, (title, desc) in zip(cols, methods):
+        with col:
+            card(title, "", desc, "#38bdf8")
 
 # =========================================================
-# S3 Loading
+# Data Utilities
 # =========================================================
 
 @st.cache_data(ttl=600)
@@ -199,9 +262,11 @@ def list_csv_keys(bucket, prefix):
         token = res.get("NextContinuationToken")
     return [f["Key"] for f in files if f["Key"].endswith(".csv")]
 
+
 def key_date(key):
     m = re.search(r"(\d{8})", key)
     return m.group(1) if m else None
+
 
 @st.cache_data(ttl=600)
 def load_csvs(bucket, keys):
@@ -213,10 +278,12 @@ def load_csvs(bucket, keys):
         dfs.append(tmp)
     return pd.concat(dfs, ignore_index=True) if dfs else pd.DataFrame()
 
+
 def normalize_date(df):
     if "analysis_date" in df.columns:
         df["analysis_date"] = pd.to_datetime(df["analysis_date"], errors="coerce").dt.strftime("%Y-%m-%d").fillna("unknown")
         return df, "analysis_date"
+
     date_col = next((c for c in ["pubDate_dt", "pubDate_ymd", "pubDate", "date", "published_date"] if c in df.columns), None)
     if not date_col:
         df["analysis_date"] = "unknown"
@@ -225,152 +292,310 @@ def normalize_date(df):
     df["analysis_date"] = df[date_col].dt.strftime("%Y-%m-%d").fillna("unknown")
     return df, "analysis_date"
 
+
 def prepare_df(df):
     df, date_col = normalize_date(df)
-    for col in ["source", "source_group", "title", "description", "originallink", "link", "event_tag"]:
+    for col in ["source", "source_group", "title", "description", "originallink", "link"]:
         if col not in df.columns:
             df[col] = ""
 
-    for col in ["source", "source_group", "title", "description", "originallink", "link", "event_tag"]:
-        df[col] = df[col].fillna("").astype(str)
-
+    df["source"] = df["source"].fillna("").astype(str)
     df.loc[df["source"].str.strip() == "", "source"] = "unknown"
-    df.loc[df["source_group"].str.strip() == "", "source_group"] = df["source"]
-    df["analysis_source"] = df["source"]
+
+    df["source_group"] = df["source_group"].fillna("").astype(str)
+    empty_group = df["source_group"].str.strip() == ""
+    df.loc[empty_group, "source_group"] = df.loc[empty_group, "source"]
+
+    df["analysis_source"] = df["source"].fillna("unknown").astype(str)
+    df.loc[df["analysis_source"].str.strip() == "", "analysis_source"] = "unknown"
 
     dedup_cols = [c for c in ["originallink", "link", "title"] if c in df.columns]
     if dedup_cols:
         df = df.drop_duplicates(subset=dedup_cols, keep="last")
     return df, date_col
 
-# =========================================================
-# Analysis Functions
-# =========================================================
 
 def text_series(df):
     return df["title"].fillna("").astype(str) + " " + df["description"].fillna("").astype(str)
 
-def contains_any(text, keywords):
-    text = str(text)
-    return any(str(kw).lower() in text.lower() for kw in keywords)
 
 def filter_keyword(df, keyword):
-    return df[text_series(df).str.contains(str(keyword), case=False, regex=False)]
+    return df[text_series(df).str.contains(keyword, case=False, regex=False)]
+
 
 def filter_keywords(df, keywords):
-    txt = text_series(df)
     cond = pd.Series(False, index=df.index)
+    txt = text_series(df)
     for kw in keywords:
-        cond |= txt.str.contains(str(kw), case=False, regex=False)
+        cond |= txt.str.contains(kw, case=False, regex=False)
     return df[cond]
+
 
 def keyword_counts(df, keywords):
     txt = text_series(df)
     rows = []
     for kw in keywords:
-        cnt = int(txt.str.contains(str(kw), case=False, regex=False).sum())
-        if cnt > 0:
-            rows.append({"keyword": kw, "count": cnt})
-    return pd.DataFrame(rows).sort_values("count", ascending=False) if rows else pd.DataFrame(columns=["keyword", "count"])
+        count = int(txt.str.contains(kw, case=False, regex=False).sum())
+        if count > 0:
+            rows.append({"keyword": kw, "count": count})
+    if not rows:
+        return pd.DataFrame(columns=["keyword", "count"])
+    return pd.DataFrame(rows).sort_values("count", ascending=False)
 
-def tfidf_keyword_scores(df, candidates=CORE_KEYWORDS, top_n=20):
-    txt = text_series(df)
-    total_docs = len(txt)
+# =========================================================
+# Analysis Functions
+# =========================================================
+
+def extract_dynamic_keywords(df, top_n=20):
+    """
+    데이터에서 자동으로 떠오르는 키워드를 추출한다.
+    단, 무의미한 일반어를 줄이기 위해 IT 후보 키워드 사전 안에서만 추출한다.
+    """
+    tfidf_df = tfidf_keywords(df, top_n=top_n)
+    if tfidf_df.empty:
+        return []
+    return tfidf_df["keyword"].dropna().astype(str).tolist()
+
+
+def build_hybrid_keywords(df, core_keywords=None, dynamic_top_n=20, max_total=40):
+    """
+    Core Keywords + Dynamic Keywords 결합.
+    - Core: 분석의 안정성을 위한 고정 IT 핵심 키워드
+    - Dynamic: 최신 뉴스 데이터에서 자동 추출된 emerging keyword
+    """
+    if core_keywords is None:
+        core_keywords = CORE_KEYWORDS
+
+    dynamic_keywords = extract_dynamic_keywords(df, top_n=dynamic_top_n)
+
+    merged = []
+    for kw in list(core_keywords) + dynamic_keywords:
+        kw = str(kw).strip()
+        if kw and kw not in merged:
+            merged.append(kw)
+
+    return merged[:max_total], dynamic_keywords
+
+
+def classify_sentiment(df):
+    pos_words = ["성장", "확대", "출시", "투자", "협력", "개선", "강화", "수주", "증가", "성공", "최초", "고도화", "혁신"]
+    neg_words = ["해킹", "침해", "유출", "장애", "중단", "규제", "감소", "적자", "위험", "논란", "피해", "취약점", "공격"]
+    labels = []
+    for text in text_series(df):
+        pos, neg = sum(w in text for w in pos_words), sum(w in text for w in neg_words)
+        labels.append("긍정/성장" if pos > neg else "부정/리스크" if neg > pos else "중립")
+    return labels
+
+
+def topic_counts(df):
+    return pd.DataFrame([
+        {"topic": topic, "count": len(filter_keywords(df, kws)), "keywords": ", ".join(kws)}
+        for topic, kws in TOPIC_MAP.items()
+    ]).sort_values("count", ascending=False)
+
+
+def topic_sentiment(df):
     rows = []
-    for kw in candidates:
-        contains = txt.str.contains(str(kw), case=False, regex=False)
-        article_count = int(contains.sum())
-        if article_count == 0:
-            continue
-        idf = 1 + math.log((1 + total_docs) / (1 + article_count))
-        score = article_count * idf
-        rows.append({
-            "keyword": kw,
-            "article_count": article_count,
-            "idf": round(idf, 4),
-            "tfidf_score": round(score, 4),
-            "coverage_ratio": round(article_count / total_docs * 100, 2) if total_docs else 0
-        })
-    return pd.DataFrame(rows).sort_values("tfidf_score", ascending=False).head(top_n) if rows else pd.DataFrame()
-
-def classify_topic_for_row(text):
-    matched = []
     for topic, kws in TOPIC_MAP.items():
-        if contains_any(text, kws):
-            matched.append(topic)
-    return matched[0] if matched else "기타"
+        sub = filter_keywords(df, kws)
+        total = len(sub)
+        counts = sub["sentiment_group"].value_counts() if total else pd.Series(dtype=int)
+        pos, neu, risk = int(counts.get("긍정/성장", 0)), int(counts.get("중립", 0)), int(counts.get("부정/리스크", 0))
+        rows.append({
+            "topic": topic, "total": total, "긍정/성장": pos, "중립": neu, "부정/리스크": risk,
+            "positive_ratio": round(pos / total * 100, 1) if total else 0,
+            "risk_ratio": round(risk / total * 100, 1) if total else 0,
+        })
+    return pd.DataFrame(rows).sort_values("total", ascending=False)
 
-def add_topic_columns(df):
-    out = df.copy()
-    txt = text_series(out)
-    out["primary_topic"] = txt.apply(classify_topic_for_row)
-    return out
 
-def classify_sentiment_text(text):
-    pos = sum(w in str(text) for w in POSITIVE_WORDS)
-    risk = sum(w in str(text) for w in RISK_WORDS)
-    if risk > pos:
-        return "부정/리스크"
-    if pos > risk:
-        return "긍정/성장"
-    return "중립"
-
-def add_sentiment(df):
-    out = df.copy()
-    out["sentiment_group"] = text_series(out).apply(classify_sentiment_text)
-    return out
-
-def detect_event_text(text):
-    tags = []
-    for tag, kws in EVENT_KEYWORDS.items():
-        if contains_any(text, kws):
-            tags.append(tag)
-    return ", ".join(tags)
-
-def add_event_tags(df):
-    out = df.copy()
-    calculated = text_series(out).apply(detect_event_text)
-    existing = out["event_tag"].fillna("").astype(str) if "event_tag" in out.columns else ""
-    out["event_detected"] = existing.where(existing.str.strip() != "", calculated)
-    out["is_event_article"] = out["event_detected"].str.strip() != ""
-    return out
-
-def daily_counts(df, date_col):
-    return df.groupby(date_col).size().reset_index(name="article_count").sort_values(date_col)
-
-def daily_keyword_matrix(df, date_col, keywords):
+def daily_top_keywords(df, date_col, top_n=5):
     rows = []
     for date in sorted(df[date_col].dropna().unique()):
         sub = df[df[date_col] == date]
-        counts = keyword_counts(sub, keywords)
-        for _, row in counts.iterrows():
-            rows.append({"date": date, "keyword": row["keyword"], "count": int(row["count"])})
+        for rank, row in enumerate(keyword_counts(sub, MAIN_KEYWORDS).head(top_n).itertuples(), 1):
+            rows.append({"date": date, "rank": rank, "keyword": row.keyword, "count": row.count})
     return pd.DataFrame(rows)
 
-def surge_sustain_analysis(df, date_col, keywords):
-    daily = daily_keyword_matrix(df, date_col, keywords)
-    if daily.empty:
-        return pd.DataFrame()
 
-    pivot = daily.pivot_table(index="date", columns="keyword", values="count", aggfunc="sum", fill_value=0).sort_index()
+def render_daily_keyword_timeline(daily_df, top_n=5):
+    if daily_df.empty:
+        st.warning("일별 키워드 데이터가 없습니다.")
+        return
+
+    st.markdown("### 일별 키워드 히트맵")
+    st.caption("날짜별로 어떤 IT 키워드가 강하게 등장했는지 한눈에 확인합니다.")
+
+    pivot = daily_df.pivot_table(
+        index="keyword",
+        columns="date",
+        values="count",
+        aggfunc="sum",
+        fill_value=0
+    )
+
+    keyword_order = pivot.sum(axis=1).sort_values(ascending=False).head(12).index
+    pivot = pivot.loc[keyword_order]
+
+    st.dataframe(
+        pivot.style.background_gradient(axis=1),
+        use_container_width=True
+    )
+
+    st.markdown("### 날짜별 TOP 키워드 상세")
+    selected_date = st.selectbox(
+        "상세 확인 날짜 선택",
+        sorted(daily_df["date"].dropna().unique(), reverse=True),
+        key="daily_keyword_date_select"
+    )
+
+    day_df = daily_df[daily_df["date"] == selected_date].sort_values("rank").head(top_n)
+
+    cols = st.columns(top_n)
+    prev_date_candidates = [d for d in sorted(daily_df["date"].dropna().unique()) if d < selected_date]
+    prev_rank_map = {}
+    if prev_date_candidates:
+        prev_date = prev_date_candidates[-1]
+        prev_df = daily_df[daily_df["date"] == prev_date]
+        prev_rank_map = dict(zip(prev_df["keyword"], prev_df["rank"]))
+
+    for idx, (_, row) in enumerate(day_df.iterrows()):
+        keyword = row["keyword"]
+        count = int(row["count"])
+        rank = int(row["rank"])
+        prev_rank = prev_rank_map.get(keyword)
+
+        if prev_rank is None:
+            movement = "NEW"
+            movement_color = "#38bdf8"
+        elif prev_rank > rank:
+            movement = "UP"
+            movement_color = "#22c55e"
+        elif prev_rank < rank:
+            movement = "DOWN"
+            movement_color = "#ef4444"
+        else:
+            movement = "STAY"
+            movement_color = "#94a3b8"
+
+        with cols[idx]:
+            st.markdown(f"""
+            <div style="
+                background:rgba(15,23,42,.82);
+                border:1px solid rgba(56,189,248,.20);
+                border-radius:18px;
+                padding:16px 14px;
+                min-height:132px;
+                box-shadow:0 0 16px rgba(56,189,248,.05);
+            ">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+                    <div style="font-size:13px;color:#94a3b8;font-weight:800;">Rank {rank}</div>
+                    <div style="font-size:11px;color:{movement_color};font-weight:950;">{movement}</div>
+                </div>
+                <div style="font-size:20px;font-weight:950;color:#f8fafc;margin-bottom:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+                    {keyword}
+                </div>
+                <div style="font-size:24px;font-weight:950;color:#38bdf8;margin-bottom:8px;">
+                    {count:,}건
+                </div>
+                <div style="font-size:12px;color:#64748b;line-height:1.4;">
+                    선택일 기준 TOP 키워드
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+
+
+def render_keyword_trend_detail(daily_df, keyword):
+    selected = daily_df[daily_df["keyword"] == keyword].sort_values("date")
+
+    if selected.empty:
+        st.warning(f"'{keyword}' 키워드의 일별 데이터가 없습니다.")
+        return
+
+    st.markdown(f"### '{keyword}' 일별 움직임")
+
+    cols = st.columns(3)
+    with cols[0]:
+        card("등장 일수", f"{selected['date'].nunique():,}일", "TOP 키워드에 포함된 날짜 수")
+    with cols[1]:
+        card("최고 순위", f"{int(selected['rank'].min())}위", "기간 내 가장 높은 순위")
+    with cols[2]:
+        card("최대 기사 수", f"{int(selected['count'].max()):,}건", "하루 기준 최대 언급량")
+
+    progress_list(
+        selected.sort_values("count", ascending=False),
+        "date",
+        "count",
+        f"'{keyword}' 언급량이 높았던 날짜",
+        top_n=min(10, len(selected))
+    )
+
+    st.dataframe(selected, use_container_width=True)
+
+
+def topic_timeseries(df, date_col):
     rows = []
-    for kw in pivot.columns:
-        s = pivot[kw].astype(float)
-        total_count = int(s.sum())
-        active_days = int((s > 0).sum())
-        max_count = int(s.max())
-        max_date = s.idxmax()
-        prev = s.shift(1)
-        growth = []
-        for today, yesterday in zip(s.iloc[1:], prev.iloc[1:]):
-            if yesterday == 0 and today > 0:
-                growth.append(100.0)
-            elif yesterday > 0:
-                growth.append((today - yesterday) / yesterday * 100)
-        max_growth_rate = round(max(growth), 1) if growth else 0.0
+    for date in sorted(df[date_col].dropna().unique()):
+        sub = df[df[date_col] == date]
+        row = {"date": date}
+        for topic, kws in TOPIC_MAP.items():
+            row[topic] = len(filter_keywords(sub, kws))
+        rows.append(row)
+    return pd.DataFrame(rows)
 
-        total_days = len(s)
-        if active_days >= max(3, int(total_days * 0.6)):
+
+def keyword_daily_matrix(df, date_col):
+    rows = []
+
+    for date in sorted(df[date_col].dropna().unique()):
+        sub = df[df[date_col] == date]
+        counts = keyword_counts(sub, MAIN_KEYWORDS)
+
+        for _, row in counts.iterrows():
+            rows.append({
+                "date": date,
+                "keyword": row["keyword"],
+                "count": int(row["count"])
+            })
+
+    return pd.DataFrame(rows)
+
+
+def surge_sustain_analysis(df, date_col):
+    """
+    키워드별 총 언급량, 등장 일수, 최대 증가율을 계산해
+    지속형/급등형/이벤트형/관찰형으로 분류한다.
+    """
+    daily = keyword_daily_matrix(df, date_col)
+
+    if daily.empty:
+        return pd.DataFrame(columns=[
+            "keyword", "total_count", "active_days", "max_count",
+            "avg_count", "max_growth_rate", "trend_type"
+        ])
+
+    pivot = daily.pivot_table(
+        index="date",
+        columns="keyword",
+        values="count",
+        aggfunc="sum",
+        fill_value=0
+    ).sort_index()
+
+    rows = []
+
+    for keyword in pivot.columns:
+        series = pivot[keyword].astype(float)
+        total_count = int(series.sum())
+        active_days = int((series > 0).sum())
+        max_count = int(series.max())
+        avg_count = round(float(series.mean()), 2)
+
+        prev = series.shift(1).replace(0, pd.NA)
+        growth = ((series - prev) / prev * 100).replace([float("inf"), -float("inf")], pd.NA)
+        max_growth_rate = round(float(growth.max()), 1) if growth.notna().any() else 0.0
+
+        if active_days >= max(3, int(len(series) * 0.6)):
             trend_type = "지속형"
         elif max_growth_rate >= 100:
             trend_type = "급등형"
@@ -380,94 +605,236 @@ def surge_sustain_analysis(df, date_col, keywords):
             trend_type = "관찰형"
 
         rows.append({
-            "keyword": kw,
+            "keyword": keyword,
             "total_count": total_count,
             "active_days": active_days,
             "max_count": max_count,
-            "max_date": max_date,
+            "avg_count": avg_count,
             "max_growth_rate": max_growth_rate,
             "trend_type": trend_type
         })
-    return pd.DataFrame(rows).sort_values(["trend_type", "total_count"], ascending=[True, False])
 
-def topic_summary(df):
-    counts = df["primary_topic"].value_counts().reset_index()
-    counts.columns = ["topic", "article_count"]
-    total = len(df)
-    counts["ratio"] = (counts["article_count"] / total * 100).round(1) if total else 0
-    return counts
+    result = pd.DataFrame(rows)
 
-def topic_timeseries(df, date_col):
-    pivot = df.pivot_table(index=date_col, columns="primary_topic", values="title", aggfunc="count", fill_value=0).reset_index()
-    return pivot.rename(columns={date_col: "date"})
+    if result.empty:
+        return result
 
-def keyword_network(df, keywords):
+    return result.sort_values(["trend_type", "total_count"], ascending=[True, False]).reset_index(drop=True)
+
+
+def keyword_network(df):
     rows = []
     for text in text_series(df):
-        appeared = sorted({kw for kw in keywords if str(kw).lower() in str(text).lower()})
+        appeared = sorted({kw for kw in MAIN_KEYWORDS if kw.lower() in text.lower()})
         rows.extend(combinations(appeared, 2))
     if not rows:
         return pd.DataFrame(columns=["keyword_a", "keyword_b", "co_count"])
     return pd.DataFrame(rows, columns=["keyword_a", "keyword_b"]).value_counts().reset_index(name="co_count").sort_values("co_count", ascending=False)
 
+
+def tfidf_keywords(df, top_n=20):
+    """IT 키워드 사전 기반 TF-IDF 유사 중요도."""
+    txt = text_series(df).fillna("").astype(str)
+    if len(txt) == 0 or txt.str.strip().eq("").all():
+        return pd.DataFrame(columns=["keyword", "score", "article_count"])
+
+    total_docs = len(txt)
+    rows = []
+    for keyword in IT_TFIDF_CANDIDATES:
+        contains = txt.str.contains(keyword, case=False, regex=False)
+        article_count = int(contains.sum())
+        if article_count == 0:
+            continue
+        idf = 1 + math.log((1 + total_docs) / (1 + article_count))
+        score = article_count * idf
+        rows.append({"keyword": keyword, "score": round(score, 4), "article_count": article_count})
+
+    result = pd.DataFrame(rows)
+    if result.empty:
+        return pd.DataFrame(columns=["keyword", "score", "article_count"])
+    return result.sort_values("score", ascending=False).head(top_n).reset_index(drop=True)
+
+
+def similar_articles(df, keyword, top_n=10):
+    txt = text_series(df).fillna("").astype(str)
+    if len(txt) < 2:
+        return pd.DataFrame()
+    vec = TfidfVectorizer(max_features=1200, stop_words=STOPWORDS, token_pattern=r"(?u)\b[가-힣A-Za-z0-9]{2,}\b")
+    try:
+        mat = vec.fit_transform(txt.tolist() + [keyword])
+        scores = cosine_similarity(mat[:-1], mat[-1]).flatten()
+    except ValueError:
+        return pd.DataFrame()
+    out = df.copy()
+    out["similarity_score"] = scores
+    cols = [c for c in ["analysis_date", "analysis_source", "source_group", "title", "description", "originallink", "link", "similarity_score"] if c in out.columns]
+    return out.sort_values("similarity_score", ascending=False)[cols].head(top_n)
+
+
+def source_keyword_table(df):
+    rows = []
+    for src in df["analysis_source"].value_counts().head(15).index:
+        sub = df[df["analysis_source"] == src]
+        row = {"source": src, "total_articles": len(sub)}
+        for _, r in keyword_counts(sub, MAIN_KEYWORDS).iterrows():
+            row[r["keyword"]] = int(r["count"])
+        rows.append(row)
+    return pd.DataFrame(rows)
+
+
+def source_topic_ratio(df):
+    rows = []
+    for src in df["analysis_source"].value_counts().head(15).index:
+        sub = df[df["analysis_source"] == src]
+        total = len(sub)
+        row = {"source": src, "total": total}
+        for topic, kws in TOPIC_MAP.items():
+            row[topic] = round(len(filter_keywords(sub, kws)) / total * 100, 1) if total else 0
+        rows.append(row)
+    return pd.DataFrame(rows)
+
+
+def source_frame(df):
+    frames = {
+        "성장/혁신": ["성장", "혁신", "출시", "확대", "협력", "투자", "강화"],
+        "보안/리스크": ["해킹", "침해", "유출", "장애", "공격", "위험", "취약점"],
+        "산업/경쟁": ["시장", "경쟁", "점유율", "HBM", "반도체", "공급망", "수출"],
+        "정책/규제": ["정부", "규제", "정책", "법안", "지원", "제도"],
+        "인프라/클라우드": ["클라우드", "데이터센터", "AWS", "Azure", "서버", "인프라"],
+    }
+    rows = []
+    for src in df["analysis_source"].value_counts().head(15).index:
+        sub = df[df["analysis_source"] == src]
+        txt = text_series(sub)
+        row = {"source": src, "total_articles": len(sub)}
+        for frame, kws in frames.items():
+            row[frame] = int(sum(txt.str.contains(kw, case=False, regex=False).sum() for kw in kws))
+        rows.append(row)
+    return pd.DataFrame(rows)
+
+
+def event_annotations(df, date_col):
+    return pd.DataFrame([
+        {"date": d, "event": f"기사 급증 ({int(c):,}건)", "analysis": "기업 발표, 보안 사고, 기술 행사, 정책 발표 등 실제 이벤트와 연결 가능"}
+        for d, c in df[date_col].value_counts().sort_values(ascending=False).head(5).items()
+    ])
+
+
 def network_html(net_df, top_n=25):
     G = nx.Graph()
+
     for _, row in net_df.head(top_n).iterrows():
         weight = int(row["co_count"])
-        G.add_edge(row["keyword_a"], row["keyword_b"], value=max(1, weight), title=f"{row['keyword_a']} ↔ {row['keyword_b']} | {weight:,}건")
+        G.add_edge(
+            row["keyword_a"],
+            row["keyword_b"],
+            value=max(1, weight / 80),
+            width=max(1, min(10, weight / 120)),
+            title=f"{row['keyword_a']} ↔ {row['keyword_b']} | 동시출현 {weight:,}건"
+        )
 
-    net = Network(height="680px", width="100%", bgcolor="#0f172a", font_color="white", notebook=False)
+    net = Network(
+        height="720px",
+        width="100%",
+        bgcolor="#0f172a",
+        font_color="white",
+        notebook=False
+    )
     net.from_nx(G)
 
     degrees = dict(G.degree())
-    weighted = dict(G.degree(weight="value"))
+    weighted_degree = dict(G.degree(weight="value"))
+
     for node in net.nodes:
         node_id = node["id"]
-        node["size"] = min(76, max(24, 20 + weighted.get(node_id, 1) * 0.55))
-        node["color"] = {"background": "#38bdf8", "border": "#7dd3fc"}
+        size = 20 + weighted_degree.get(node_id, 1) * 1.8
+        node["size"] = min(76, max(24, size))
+        node["color"] = {
+            "background": "#38bdf8",
+            "border": "#7dd3fc",
+            "highlight": {"background": "#60a5fa", "border": "#e0f2fe"}
+        }
+        node["borderWidth"] = 2
+        node["title"] = f"{node_id}<br>연결 키워드 수: {degrees.get(node_id, 0)}<br>연결 강도: {weighted_degree.get(node_id, 0):.1f}"
         node["font"] = {"size": 18, "face": "Arial", "color": "#f8fafc", "strokeWidth": 3, "strokeColor": "#0f172a"}
-        node["title"] = f"{node_id}<br>연결 키워드 수: {degrees.get(node_id, 0)}"
 
     for edge in net.edges:
         edge["color"] = {"color": "rgba(148,163,184,.72)", "highlight": "#38bdf8"}
-        edge["width"] = min(10, max(1, edge.get("value", 1) / 5))
+        edge["smooth"] = {"type": "dynamic"}
 
     net.set_options("""
     var options = {
-      "interaction": {"hover": true, "dragNodes": true, "dragView": true, "zoomView": true},
-      "nodes": {"shape": "dot"},
-      "physics": {"enabled": false}
+      "interaction": {
+        "hover": true,
+        "tooltipDelay": 120,
+        "dragNodes": true,
+        "dragView": true,
+        "zoomView": true
+      },
+      "nodes": {
+        "shape": "dot",
+        "scaling": {"min": 20, "max": 80}
+      },
+      "edges": {
+        "scaling": {"min": 1, "max": 10},
+        "smooth": {"enabled": true, "type": "continuous"}
+      },
+      "physics": {
+        "enabled": false
+      }
     }
     """)
+
     path = tempfile.NamedTemporaryFile(delete=False, suffix=".html").name
     net.save_graph(path)
     with open(path, "r", encoding="utf-8") as f:
         return f.read()
 
-def data_quality_checks(df, date_col):
-    txt = text_series(df).str.lower()
-    bad_rows = []
-    for token in BAD_TOKENS:
-        count = int(txt.str.contains(token.lower(), regex=False).sum())
-        if count > 0:
-            bad_rows.append({"token": token, "article_count": count})
-    bad_df = pd.DataFrame(bad_rows).sort_values("article_count", ascending=False) if bad_rows else pd.DataFrame(columns=["token", "article_count"])
 
-    dcnt = daily_counts(df, date_col)
-    total = len(df)
-    if not dcnt.empty and total:
-        peak_count = int(dcnt["article_count"].max())
-        peak_ratio = round(peak_count / total * 100, 1)
-        peak_date = dcnt.loc[dcnt["article_count"].idxmax(), date_col]
-    else:
-        peak_count, peak_ratio, peak_date = 0, 0, "-"
+def render_strong_connections(net_df, top_n=6):
+    if net_df.empty:
+        st.warning("표시할 키워드 연결 데이터가 없습니다.")
+        return
 
-    return bad_df, peak_date, peak_count, peak_ratio
+    st.markdown("### 주요 키워드 연결")
+    st.caption("같은 기사 안에서 가장 자주 함께 등장한 키워드 조합입니다.")
 
-def article_table(df, date_col="analysis_date", n=100):
-    cols = [c for c in [date_col, "analysis_source", "source_group", "primary_topic", "sentiment_group", "event_detected", "title", "description", "originallink", "link"] if c in df.columns]
-    view = df.sort_values(date_col, ascending=False).head(n) if date_col in df.columns else df.head(n)
-    st.dataframe(view[cols], use_container_width=True)
+    view = net_df.head(top_n).reset_index(drop=True)
+    cols = st.columns(3)
+
+    for idx, (_, row) in enumerate(view.iterrows()):
+        with cols[idx % 3]:
+            pair = f"{row['keyword_a']} ↔ {row['keyword_b']}"
+            card(
+                pair,
+                f"{int(row['co_count']):,}건",
+                "동시출현 빈도 기준 핵심 연결",
+                "#38bdf8"
+            )
+
+
+def render_network_summary(net_df):
+    if net_df.empty:
+        return
+
+    top_pair = net_df.iloc[0]
+    unique_nodes = len(set(net_df["keyword_a"]).union(set(net_df["keyword_b"])))
+    total_links = len(net_df)
+
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        card("가장 강한 연결", f"{top_pair['keyword_a']} ↔ {top_pair['keyword_b']}", f"{int(top_pair['co_count']):,}건 동시출현")
+    with c2:
+        card("연결 키워드 수", f"{unique_nodes:,}", "네트워크에 포함된 고유 키워드")
+    with c3:
+        card("키워드 연결 수", f"{total_links:,}", "분석된 키워드 페어 수")
+
+
+def article_table(df, date_col="analysis_date"):
+    cols = [c for c in [date_col, "analysis_source", "source_group", "title", "description", "originallink", "link"] if c in df.columns]
+    if date_col in df.columns:
+        df = df.sort_values(date_col, ascending=False)
+    st.dataframe(df[cols], use_container_width=True)
 
 # =========================================================
 # Load + Compute
@@ -475,407 +842,518 @@ def article_table(df, date_col="analysis_date", n=100):
 
 keys = [k for k in list_csv_keys(BUCKET_NAME, S3_PREFIX) if (key_date(k) and key_date(k) >= START_DATE)]
 if not keys:
-    st.error("S3 processed 경로에서 분석할 CSV 파일을 찾지 못했습니다.")
+    st.error("2026년 5월 14일 이후 CSV 파일을 찾지 못했습니다.")
     st.stop()
 
 df = load_csvs(BUCKET_NAME, sorted(keys))
 df, DATE_COL = prepare_df(df)
-df = add_topic_columns(df)
-df = add_sentiment(df)
-df = add_event_tags(df)
 
 latest_date = df[DATE_COL].dropna().max()
 latest_df = df[df[DATE_COL] == latest_date].copy()
 
-tfidf_df = tfidf_keyword_scores(df, CORE_KEYWORDS, 25)
-analysis_keywords = tfidf_df["keyword"].head(30).tolist() if not tfidf_df.empty else CORE_KEYWORDS
-surge_df = surge_sustain_analysis(df, DATE_COL, analysis_keywords)
-topic_df = topic_summary(df)
+df["sentiment_group"] = classify_sentiment(df)
+latest_df["sentiment_group"] = classify_sentiment(latest_df)
+
+MAIN_KEYWORDS, DYNAMIC_KEYWORDS = build_hybrid_keywords(latest_df, CORE_KEYWORDS, dynamic_top_n=20, max_total=40)
+
+top_keywords = keyword_counts(latest_df, MAIN_KEYWORDS).head(10)
+daily_kw = daily_top_keywords(df, DATE_COL)
+net_df = keyword_network(df)
+topic_df = topic_counts(latest_df)
+topic_sent_df = topic_sentiment(df)
 topic_ts_df = topic_timeseries(df, DATE_COL)
-net_df = keyword_network(df, analysis_keywords)
-daily_df = daily_counts(df, DATE_COL)
-bad_token_df, peak_date, peak_count, peak_ratio = data_quality_checks(df, DATE_COL)
+surge_df = surge_sustain_analysis(df, DATE_COL)
+
 
 # =========================================================
-# Tabs
+# Executive Analysis Dashboard
 # =========================================================
 
-tabs = st.tabs([
-    "1. 분석 개요",
-    "2. 데이터 품질 검증",
-    "3. TF-IDF 키워드 분석",
-    "4. 토픽 분류 분석",
-    "5. 기간 내 이슈 변화",
-    "6. 이벤트 영향 분석",
-    "7. 키워드 관계 분석",
-    "8. 리스크 신호 분석",
-    "9. 근거 기사"
+# 이 버전은 단순 기사 나열보다 "분석 결과 → 근거 데이터 → 관련 기사" 흐름을 우선합니다.
+
+# 추가 분석 유틸리티
+
+def safe_first_value(df, col, default="-"):
+    if df is None or df.empty or col not in df.columns:
+        return default
+    value = df.iloc[0][col]
+    return default if pd.isna(value) else value
+
+
+def daily_article_summary(df, date_col):
+    if df.empty or date_col not in df.columns:
+        return pd.DataFrame(columns=["date", "article_count", "prev_count", "change", "change_rate"])
+
+    daily = (
+        df.groupby(date_col)
+        .size()
+        .reset_index(name="article_count")
+        .sort_values(date_col)
+    )
+    daily = daily.rename(columns={date_col: "date"})
+    daily["prev_count"] = daily["article_count"].shift(1)
+    daily["change"] = daily["article_count"] - daily["prev_count"]
+    daily["change_rate"] = (daily["change"] / daily["prev_count"].replace(0, pd.NA) * 100).round(1)
+    daily[["prev_count", "change", "change_rate"]] = daily[["prev_count", "change", "change_rate"]].fillna(0)
+    return daily
+
+
+def keyword_daily_detail(df, date_col, keyword):
+    if not keyword:
+        return pd.DataFrame(columns=["date", "count", "prev_count", "change", "change_rate"])
+
+    rows = []
+    for date in sorted(df[date_col].dropna().unique()):
+        sub = df[df[date_col] == date]
+        count = int(text_series(sub).str.contains(keyword, case=False, regex=False).sum())
+        rows.append({"date": date, "count": count})
+
+    out = pd.DataFrame(rows)
+    if out.empty:
+        return pd.DataFrame(columns=["date", "count", "prev_count", "change", "change_rate"])
+    out["prev_count"] = out["count"].shift(1)
+    out["change"] = out["count"] - out["prev_count"]
+    out["change_rate"] = (out["change"] / out["prev_count"].replace(0, pd.NA) * 100).round(1)
+    out[["prev_count", "change", "change_rate"]] = out[["prev_count", "change", "change_rate"]].fillna(0)
+    return out
+
+
+def keyword_profile(df, date_col, keyword):
+    daily = keyword_daily_detail(df, date_col, keyword)
+    if daily.empty:
+        return {
+            "total": 0,
+            "active_days": 0,
+            "peak_date": "-",
+            "peak_count": 0,
+            "latest_count": 0,
+            "latest_change": 0,
+            "latest_rate": 0,
+            "trend_type": "관찰형",
+        }
+
+    total = int(daily["count"].sum())
+    active_days = int((daily["count"] > 0).sum())
+    peak_row = daily.sort_values("count", ascending=False).iloc[0]
+    latest_row = daily.iloc[-1]
+
+    trend_type = "관찰형"
+    if not surge_df.empty and keyword in surge_df["keyword"].astype(str).tolist():
+        trend_type = surge_df[surge_df["keyword"].astype(str) == str(keyword)].iloc[0]["trend_type"]
+    elif active_days >= max(3, int(df[date_col].nunique() * 0.6)):
+        trend_type = "지속형"
+    elif daily["change_rate"].max() >= 100:
+        trend_type = "급등형"
+
+    return {
+        "total": total,
+        "active_days": active_days,
+        "peak_date": peak_row["date"],
+        "peak_count": int(peak_row["count"]),
+        "latest_count": int(latest_row["count"]),
+        "latest_change": int(latest_row["change"]),
+        "latest_rate": float(latest_row["change_rate"]),
+        "trend_type": trend_type,
+    }
+
+
+def top_keyword_movers(df, date_col, keywords, top_n=10):
+    dates = sorted(df[date_col].dropna().unique())
+    if len(dates) < 2:
+        return pd.DataFrame(columns=["keyword", "latest_count", "prev_count", "change", "change_rate"])
+
+    prev_date, latest_date_local = dates[-2], dates[-1]
+    prev_df = df[df[date_col] == prev_date]
+    latest_df_local = df[df[date_col] == latest_date_local]
+
+    rows = []
+    for kw in keywords:
+        prev_count = int(text_series(prev_df).str.contains(kw, case=False, regex=False).sum())
+        latest_count = int(text_series(latest_df_local).str.contains(kw, case=False, regex=False).sum())
+        change = latest_count - prev_count
+        rate = round((change / prev_count * 100), 1) if prev_count else (100.0 if latest_count else 0.0)
+        if latest_count > 0 or prev_count > 0:
+            rows.append({
+                "keyword": kw,
+                "latest_count": latest_count,
+                "prev_count": prev_count,
+                "change": change,
+                "change_rate": rate,
+            })
+
+    if not rows:
+        return pd.DataFrame(columns=["keyword", "latest_count", "prev_count", "change", "change_rate"])
+    return pd.DataFrame(rows).sort_values(["change", "latest_count"], ascending=False).head(top_n)
+
+
+def dominant_topic_by_date(df, date_col):
+    rows = []
+    for date in sorted(df[date_col].dropna().unique()):
+        sub = df[df[date_col] == date]
+        topic_count = topic_counts(sub)
+        if topic_count.empty:
+            continue
+        top = topic_count.iloc[0]
+        rows.append({
+            "date": date,
+            "dominant_topic": top["topic"],
+            "count": int(top["count"]),
+            "keywords": top["keywords"],
+        })
+    return pd.DataFrame(rows)
+
+
+def render_insight_box(title, bullets, tone="info"):
+    text = "\n".join([f"- {b}" for b in bullets if b])
+    if tone == "warning":
+        st.warning(f"**{title}**\n\n{text}")
+    elif tone == "error":
+        st.error(f"**{title}**\n\n{text}")
+    else:
+        st.info(f"**{title}**\n\n{text}")
+
+
+def compact_article_evidence(df, keyword=None, top_n=8):
+    view = df.copy()
+    if keyword:
+        view = filter_keyword(view, keyword)
+    if view.empty:
+        st.warning("관련 기사 근거가 없습니다.")
+        return
+    cols = [c for c in [DATE_COL, "analysis_source", "title", "description", "originallink"] if c in view.columns]
+    st.dataframe(view.sort_values(DATE_COL, ascending=False)[cols].head(top_n), use_container_width=True)
+
+
+# 공통 분석 데이터
+article_daily_df = daily_article_summary(df, DATE_COL)
+article_top_days = article_daily_df.sort_values("article_count", ascending=False).head(5)
+article_surge_days = article_daily_df.sort_values("change", ascending=False).head(5)
+all_keyword_df = keyword_counts(df, MAIN_KEYWORDS).head(15)
+latest_keyword_df = keyword_counts(latest_df, MAIN_KEYWORDS).head(10)
+keyword_movers_df = top_keyword_movers(df, DATE_COL, MAIN_KEYWORDS, top_n=10)
+dominant_topic_df = dominant_topic_by_date(df, DATE_COL)
+
+# =========================================================
+# Top Tab Menu: 줄이고, 분석 흐름 중심으로 재구성
+# =========================================================
+
+tab_overview, tab_keyword, tab_time, tab_topic, tab_risk, tab_source, tab_network, tab_evidence = st.tabs([
+    "Executive Summary",
+    "Keyword Diagnosis",
+    "Time Trend",
+    "Topic Shift",
+    "Risk Signal",
+    "Source Bias",
+    "Issue Network",
+    "Evidence Table"
 ])
 
 # =========================================================
-# 1. Overview
+# 1. Executive Summary
 # =========================================================
 
-with tabs[0]:
-    st.subheader("분석 개요")
-    st.caption("발표에서 설명할 수 있도록 분석 목적, 분석기법, 핵심 결과를 한 화면에 요약합니다.")
+with tab_overview:
+    st.subheader("Executive Summary")
+    st.caption("전체 기사 데이터를 단순 나열하지 않고, 수집 기간 내 핵심 변화와 해석을 먼저 보여줍니다.")
 
     min_date = df[DATE_COL].min()
     max_date = df[DATE_COL].max()
     total_days = df[DATE_COL].nunique()
+    total_articles = len(df)
+    latest_articles = len(latest_df)
 
-    top_kw = tfidf_df.iloc[0]["keyword"] if not tfidf_df.empty else "-"
-    top_kw_score = tfidf_df.iloc[0]["tfidf_score"] if not tfidf_df.empty else 0
-    top_topic = topic_df.iloc[0]["topic"] if not topic_df.empty else "-"
-    top_topic_ratio = topic_df.iloc[0]["ratio"] if not topic_df.empty else 0
-    top_risk_count = int((df["sentiment_group"] == "부정/리스크").sum())
+    top_keyword = safe_first_value(all_keyword_df, "keyword")
+    top_keyword_count = int(safe_first_value(all_keyword_df, "count", 0)) if not all_keyword_df.empty else 0
+    top_topic_row = topic_counts(df).iloc[0] if not topic_counts(df).empty else None
+    top_topic = top_topic_row["topic"] if top_topic_row is not None else "-"
+    top_topic_count = int(top_topic_row["count"]) if top_topic_row is not None else 0
 
-    c1, c2, c3, c4 = st.columns(4)
-    with c1:
-        card("분석 기간", f"{min_date} ~ {max_date}", f"총 {total_days:,}일 기준")
-    with c2:
-        card("분석 기사 수", f"{len(df):,}건", "S3 processed CSV 기준")
-    with c3:
-        card("핵심 키워드", top_kw, f"TF-IDF 점수 {top_kw_score}")
-    with c4:
-        card("최대 토픽", top_topic, f"전체 중 {top_topic_ratio}%")
-
-    section("적용한 분석기법")
-    m1, m2, m3 = st.columns(3)
-    with m1:
-        method_box("TF-IDF 키워드 중요도", "단순 빈도가 아니라 분석 기간 내 상대적으로 중요한 IT 키워드 확인", "기사 포함 수 × IDF", "점수가 높을수록 핵심 이슈일 가능성이 높음")
-    with m2:
-        method_box("시계열/급등률 분석", "키워드가 특정 날짜에 급증했는지 또는 지속적으로 나타났는지 확인", "전일 대비 증가율, 등장 일수", "지속형·급등형·이벤트형으로 구분")
-    with m3:
-        method_box("동시출현/이벤트 영향 분석", "키워드 간 관계와 행사성 기사 편향 여부 확인", "같은 기사 내 키워드 쌍, 이벤트 키워드 포함률", "트렌드 변화와 단일 이벤트 효과를 구분")
-
-    section("핵심 분석 결과")
-    top_sustained = surge_df[surge_df["trend_type"] == "지속형"].head(1)["keyword"].iloc[0] if not surge_df[surge_df["trend_type"] == "지속형"].empty else "-"
-    top_surge = surge_df[surge_df["trend_type"] == "급등형"].sort_values("max_growth_rate", ascending=False).head(1)["keyword"].iloc[0] if not surge_df[surge_df["trend_type"] == "급등형"].empty else "-"
-    top_pair = f"{net_df.iloc[0]['keyword_a']} ↔ {net_df.iloc[0]['keyword_b']}" if not net_df.empty else "-"
-    event_ratio = round(df["is_event_article"].mean() * 100, 1) if len(df) else 0
-
-    insight_box("발표용 요약",
-        [
-            f"TF-IDF 분석 결과, 전체 기간의 핵심 키워드는 '{top_kw}'로 나타났습니다.",
-            f"토픽 분류 결과, 가장 큰 비중을 차지한 주제는 '{top_topic}'이며 전체의 {top_topic_ratio}%입니다.",
-            f"급등/지속 분석 결과, 지속형 대표 키워드는 '{top_sustained}', 급등형 대표 키워드는 '{top_surge}'로 확인되었습니다.",
-            f"동시출현 분석 결과, 가장 강한 키워드 관계는 '{top_pair}'입니다.",
-            f"이벤트 영향 분석 결과, 전체 기사 중 이벤트성 기사 비중은 약 {event_ratio}%로 확인되었습니다."
-        ]
-    )
-
-    section("연구 질문 재정의")
-    st.info("""
-    교수님 피드백을 반영하여 '장기 시기별 IT 트렌드 변화'라는 표현은 피하고,
-    본 대시보드는 약 3주 내외의 수집 데이터를 기반으로 한 '단기 IT 뉴스 이슈 변화 분석'으로 정의합니다.
-    장기 트렌드 분석을 위해서는 수개월~수년 단위의 추가 데이터 수집이 필요합니다.
-    """)
-
-# =========================================================
-# 2. Data Quality
-# =========================================================
-
-with tabs[1]:
-    st.subheader("데이터 품질 검증")
-    st.caption("분석 결과의 신뢰성을 확인하기 위해 수집 기간, 특정일 쏠림, HTML 잔여 토큰, S3 활용 구조를 점검합니다.")
+    risk_keywords = ["보안", "해킹", "개인정보", "랜섬웨어", "침해", "취약점"]
+    risk_count = len(filter_keywords(df, risk_keywords))
+    risk_ratio = round(risk_count / total_articles * 100, 1) if total_articles else 0
 
     c1, c2, c3, c4 = st.columns(4)
     with c1:
-        card("수집 시작일", df[DATE_COL].min(), "processed CSV 기준")
+        card("분석 기간", f"{min_date} ~ {max_date}", f"총 {total_days:,}일")
     with c2:
-        card("수집 종료일", df[DATE_COL].max(), "processed CSV 기준")
+        card("전체 기사 수", f"{total_articles:,}건", f"최신일 {latest_articles:,}건")
     with c3:
-        card("최대 기사 집중일", peak_date, f"{peak_count:,}건 / 전체 {peak_ratio}%")
+        card("핵심 키워드", top_keyword, f"전체 {top_keyword_count:,}건 언급")
     with c4:
-        card("S3 파일 수", f"{len(keys):,}개", "Streamlit이 직접 읽은 processed CSV")
+        card("리스크 기사 비중", f"{risk_ratio}%", f"보안/개인정보 계열 {risk_count:,}건", "#ef4444")
 
-    section("S3 기반 분석 파이프라인 검증")
-    st.code("""
-news-collector-lambda
-  → S3 Raw 저장: it_news/IT/raw/YYYY/MM/DD/HH/
+    section("핵심 해석")
 
-news-preprocessor-lambda
-  → HTML 정제, Stopword 제거, IT 키워드 필터링, 중복 제거
-  → S3 Processed 저장: it_news/IT/processed/news_final_YYYYMMDD.csv
+    top_surge_kw = safe_first_value(keyword_movers_df, "keyword")
+    top_surge_change = int(safe_first_value(keyword_movers_df, "change", 0)) if not keyword_movers_df.empty else 0
+    peak_day = safe_first_value(article_top_days, "date")
+    peak_count = int(safe_first_value(article_top_days, "article_count", 0)) if not article_top_days.empty else 0
 
-Streamlit Dashboard
-  → S3 Processed CSV를 직접 로드하여 분석 수행
-""")
-
-    section("일별 데이터 분포")
-    st.dataframe(daily_df.sort_values("article_count", ascending=False), use_container_width=True)
-    progress_list(daily_df.sort_values("article_count", ascending=False), DATE_COL, "article_count", "기사 수가 많은 날짜 TOP 10", 10)
-
-    section("HTML 엔티티/불용어 잔여 점검")
-    if bad_token_df.empty:
-        st.success("상위 문제 토큰이 본문/제목에서 탐지되지 않았습니다. 전처리 품질이 개선된 상태로 볼 수 있습니다.")
-    else:
-        st.warning("아래 토큰이 일부 남아 있습니다. 원본 데이터 또는 전처리 로직을 추가 점검하는 것이 좋습니다.")
-        st.dataframe(bad_token_df, use_container_width=True)
-
-    section("분석 한계 명시")
-    insight_box("한계점",
+    render_insight_box(
+        "이번 기간의 IT 뉴스 흐름",
         [
-            "현재 데이터는 약 3주 내외의 단기 수집 데이터이므로, 수개월~수년 단위의 장기 트렌드 분석으로 일반화하기 어렵습니다.",
-            "특정 날짜에 기사가 몰릴 경우 실제 산업 트렌드 변화가 아니라 행사·컨퍼런스·보안 사고 등 이벤트 효과일 수 있습니다.",
-            "한국어 형태소 분석기를 완전 적용한 분석은 아니므로, 어절 단위 표현이 일부 남을 수 있습니다.",
-            "따라서 본 대시보드의 분석 범위는 '장기 트렌드'가 아니라 '기간 내 뉴스 이슈 변화와 편향 탐지'입니다."
+            f"전체 기간에서 가장 강한 키워드는 '{top_keyword}'이며, 단순 빈도 기준 핵심 이슈로 볼 수 있습니다.",
+            f"가장 많이 보도된 주제군은 '{top_topic}'이며, 관련 기사 {top_topic_count:,}건이 확인됩니다.",
+            f"기사량이 가장 집중된 날짜는 {peak_day}이며, 해당일 {peak_count:,}건으로 이벤트성 이슈 발생 가능성이 있습니다.",
+            f"최신일 기준 가장 크게 증가한 키워드는 '{top_surge_kw}'이며, 전일 대비 {top_surge_change:+,}건 변화했습니다.",
         ]
     )
 
-# =========================================================
-# 3. TF-IDF Keyword
-# =========================================================
+    section("분석 요약 데이터")
+    col_a, col_b = st.columns(2)
+    with col_a:
+        progress_list(all_keyword_df.head(8), "keyword", "count", "전체 기간 핵심 키워드", top_n=8)
+    with col_b:
+        progress_list(topic_counts(df).head(8), "topic", "count", "전체 기간 핵심 주제", top_n=8)
 
-with tabs[2]:
-    st.subheader("TF-IDF 키워드 분석")
-    method_box("TF-IDF 기반 키워드 중요도", "단순 빈도 상위 키워드가 아니라, 전체 기사 집합 내에서 상대적으로 중요한 키워드를 찾습니다.", "score = article_count × IDF", "빈도는 높지만 모든 기사에 흔한 단어보다, 특정 이슈를 잘 대표하는 키워드가 높게 평가됩니다.")
+    section("중요 변화 신호")
+    col_c, col_d = st.columns(2)
+    with col_c:
+        st.markdown("### 최신일 기준 증가 키워드")
+        st.dataframe(keyword_movers_df, use_container_width=True)
+    with col_d:
+        st.markdown("### 기사량 급증일")
+        st.dataframe(article_surge_days, use_container_width=True)
 
-    c1, c2 = st.columns([1.2, 1])
-    with c1:
-        st.dataframe(tfidf_df, use_container_width=True)
-    with c2:
-        progress_list(tfidf_df, "keyword", "tfidf_score", "TF-IDF 중요도 TOP 10", 10, suffix="점")
-
-    if not tfidf_df.empty:
-        selected_kw = st.selectbox("키워드 심층 분석", tfidf_df["keyword"].tolist())
-        selected_df = filter_keyword(df, selected_kw)
-        selected_daily = selected_df.groupby(DATE_COL).size().reset_index(name="count").sort_values(DATE_COL)
-
-        max_day = selected_daily.loc[selected_daily["count"].idxmax(), DATE_COL] if not selected_daily.empty else "-"
-        max_cnt = int(selected_daily["count"].max()) if not selected_daily.empty else 0
-        active_days = selected_daily[DATE_COL].nunique()
-
-        section(f"'{selected_kw}' 심층 분석 결과")
-        k1, k2, k3, k4 = st.columns(4)
-        with k1:
-            card("전체 언급 기사", f"{len(selected_df):,}건", "전체 기간 기준")
-        with k2:
-            card("등장 일수", f"{active_days:,}일", "해당 키워드가 등장한 날짜 수")
-        with k3:
-            card("최고 집중일", max_day, f"{max_cnt:,}건")
-        with k4:
-            trend_type = surge_df[surge_df["keyword"] == selected_kw]["trend_type"].iloc[0] if not surge_df[surge_df["keyword"] == selected_kw].empty else "미분류"
-            card("트렌드 유형", trend_type, "급등/지속 분석 기준")
-
-        insight_box("해석",
-            [
-                f"'{selected_kw}' 키워드는 전체 기간 동안 {len(selected_df):,}건의 기사에서 등장했습니다.",
-                f"가장 많이 등장한 날짜는 {max_day}이며, 해당일 언급량은 {max_cnt:,}건입니다.",
-                f"등장 일수와 급등률을 함께 고려하면 이 키워드는 '{trend_type}' 성격으로 해석할 수 있습니다."
-            ]
-        )
-        st.dataframe(selected_daily, use_container_width=True)
 
 # =========================================================
-# 4. Topic Analysis
+# 2. Keyword Diagnosis
 # =========================================================
 
-with tabs[3]:
-    st.subheader("토픽 분류 분석")
-    method_box("키워드 기반 Topic Classification", "뉴스를 AI, 반도체, 클라우드, 보안 등 주요 IT 주제로 분류하여 관심 분야의 비중을 분석합니다.", "기사 제목+요약문에 포함된 토픽 키워드 매칭", "비중이 높은 토픽은 해당 기간 뉴스 의제에서 더 큰 관심을 받은 분야로 해석합니다.")
+with tab_keyword:
+    st.subheader("Keyword Diagnosis")
+    st.caption("키워드별 단순 언급량이 아니라, 등장 지속성·집중일·최근 변화·트렌드 유형을 함께 진단합니다.")
 
-    c1, c2 = st.columns([1, 1])
-    with c1:
-        st.dataframe(topic_df, use_container_width=True)
-    with c2:
-        progress_list(topic_df, "topic", "article_count", "토픽별 기사 비중", 10)
+    keyword_options = all_keyword_df["keyword"].tolist() if not all_keyword_df.empty else MAIN_KEYWORDS
+    selected_kw = st.selectbox("분석할 키워드 선택", keyword_options, key="keyword_diagnosis_select")
 
-    section("토픽별 시계열 변화")
-    st.dataframe(topic_ts_df, use_container_width=True)
-
-    if not topic_df.empty:
-        top_topic = topic_df.iloc[0]["topic"]
-        top_ratio = topic_df.iloc[0]["ratio"]
-        insight_box("토픽 분석 결과 해석",
-            [
-                f"가장 높은 비중의 토픽은 '{top_topic}'이며 전체 기사 중 {top_ratio}%를 차지했습니다.",
-                "이는 수집 기간 동안 해당 분야가 IT 뉴스 의제에서 상대적으로 강하게 부각되었음을 의미합니다.",
-                "다만 키워드 기반 분류이므로, 향후 KoNLPy 또는 LDA/BERTopic을 적용하면 더 정교한 토픽 모델링이 가능합니다."
-            ]
-        )
-
-# =========================================================
-# 5. Short-term Trend
-# =========================================================
-
-with tabs[4]:
-    st.subheader("기간 내 이슈 변화 분석")
-    method_box("Time-Series + Surge Analysis", "키워드별 일별 언급량을 계산하여 지속적으로 등장한 이슈와 특정 날짜에 급증한 이슈를 구분합니다.", "일별 count, active_days, max_growth_rate", "지속형은 반복 이슈, 급등형은 갑작스러운 관심 증가, 이벤트형은 특정일 집중 이슈로 해석합니다.")
+    profile = keyword_profile(df, DATE_COL, selected_kw)
+    selected_daily = keyword_daily_detail(df, DATE_COL, selected_kw)
+    selected_articles = filter_keyword(df, selected_kw)
 
     c1, c2, c3, c4 = st.columns(4)
-    sustained_count = len(surge_df[surge_df["trend_type"] == "지속형"]) if not surge_df.empty else 0
-    surge_count = len(surge_df[surge_df["trend_type"] == "급등형"]) if not surge_df.empty else 0
-    event_count = len(surge_df[surge_df["trend_type"] == "이벤트형"]) if not surge_df.empty else 0
     with c1:
-        card("지속형 키워드", f"{sustained_count:,}개", "반복 등장")
+        card("전체 언급량", f"{profile['total']:,}건", f"전체 기간 기준")
     with c2:
-        card("급등형 키워드", f"{surge_count:,}개", "전일 대비 증가")
+        card("등장 일수", f"{profile['active_days']:,}일", f"총 {df[DATE_COL].nunique():,}일 중")
     with c3:
-        card("이벤트형 키워드", f"{event_count:,}개", "특정일 집중")
+        card("최고 집중일", profile["peak_date"], f"{profile['peak_count']:,}건")
     with c4:
-        card("분석 키워드 수", f"{surge_df['keyword'].nunique() if not surge_df.empty else 0:,}개", "TF-IDF 기반 후보")
+        color = "#ef4444" if profile["trend_type"] == "급등형" else "#22c55e" if profile["trend_type"] == "지속형" else "#eab308" if profile["trend_type"] == "이벤트형" else "#38bdf8"
+        card("트렌드 유형", profile["trend_type"], f"최근 변화 {profile['latest_change']:+,}건", color)
 
-    selected_type = st.selectbox("트렌드 유형 선택", ["전체", "지속형", "급등형", "이벤트형", "관찰형"])
-    view = surge_df if selected_type == "전체" else surge_df[surge_df["trend_type"] == selected_type]
-    st.dataframe(view, use_container_width=True)
-
-    if not surge_df.empty:
-        growth_top = surge_df.sort_values("max_growth_rate", ascending=False).head(10)
-        progress_list(growth_top, "keyword", "max_growth_rate", "급등률 TOP 10", 10, suffix="%")
-
-    insight_box("해석",
+    section("선택 키워드 해석")
+    render_insight_box(
+        f"'{selected_kw}' 키워드 진단",
         [
-            "지속형 키워드는 단기 수집 기간 동안 반복적으로 노출된 핵심 이슈입니다.",
-            "급등형 키워드는 특정 날짜에 뉴스 관심이 급격히 증가한 이슈입니다.",
-            "이벤트형 키워드는 행사, 발표, 사고 등 단일 이벤트의 영향을 받았을 가능성이 높습니다."
+            f"'{selected_kw}'는 전체 기간 {profile['total']:,}건 등장했고, {profile['active_days']:,}일 동안 반복적으로 관찰되었습니다.",
+            f"가장 강하게 나타난 날짜는 {profile['peak_date']}이며, 해당일 {profile['peak_count']:,}건이 확인됩니다.",
+            f"최신일 기준 언급량은 {profile['latest_count']:,}건이고, 전일 대비 {profile['latest_change']:+,}건 변화했습니다.",
+            f"따라서 이 키워드는 현재 '{profile['trend_type']}' 성격으로 분류할 수 있습니다.",
         ]
     )
 
+    section("키워드 변화 추이")
+    st.line_chart(selected_daily.set_index("date")[["count"]])
+    st.dataframe(selected_daily.sort_values("date", ascending=False), use_container_width=True)
+
+    section("핵심 키워드 중요도")
+    st.caption("미리 정의한 IT 후보 키워드 안에서 기사 수와 희소성을 함께 반영한 중요도입니다.")
+    tfidf_df = tfidf_keywords(df, 20)
+    st.dataframe(tfidf_df, use_container_width=True)
+
+    section("관련 기사 근거")
+    compact_article_evidence(selected_articles, top_n=10)
+
+
 # =========================================================
-# 6. Event Impact
+# 3. Time Trend
 # =========================================================
 
-with tabs[5]:
-    st.subheader("이벤트 영향 분석")
-    method_box("Event Impact Analysis", "기사량 급증이 일반적인 트렌드 변화인지, 특정 행사나 이벤트 영향인지 구분합니다.", "이벤트 키워드 포함 기사 비율, 급증일 기사량, 이벤트 제외 후 키워드 순위 비교", "이벤트 비중이 높으면 장기 트렌드보다 단일 이벤트 효과로 해석해야 합니다.")
-
-    event_total = int(df["is_event_article"].sum())
-    event_ratio = round(event_total / len(df) * 100, 1) if len(df) else 0
-    event_daily = df.groupby(DATE_COL)["is_event_article"].agg(["sum", "count"]).reset_index()
-    event_daily["event_ratio"] = (event_daily["sum"] / event_daily["count"] * 100).round(1)
-    event_daily = event_daily.rename(columns={"sum": "event_article_count", "count": "total_article_count", DATE_COL: "date"})
+with tab_time:
+    st.subheader("Time Trend")
+    st.caption("날짜별 기사량과 키워드 변화를 통해 언제 이슈가 집중되었는지 분석합니다.")
 
     c1, c2, c3 = st.columns(3)
     with c1:
-        card("이벤트성 기사 수", f"{event_total:,}건", "이벤트 키워드 포함")
+        avg_articles = round(article_daily_df["article_count"].mean(), 1) if not article_daily_df.empty else 0
+        card("일평균 기사 수", f"{avg_articles:,}건", "전체 기간 평균")
     with c2:
-        card("이벤트성 기사 비중", f"{event_ratio}%", "전체 기사 대비")
+        peak_day = safe_first_value(article_top_days, "date")
+        peak_count = int(safe_first_value(article_top_days, "article_count", 0)) if not article_top_days.empty else 0
+        card("최대 기사량 날짜", peak_day, f"{peak_count:,}건")
     with c3:
-        high_event_date = event_daily.sort_values("event_ratio", ascending=False).iloc[0]["date"] if not event_daily.empty else "-"
-        card("이벤트 비중 최고일", high_event_date, "행사성 편향 가능 날짜")
+        surge_day = safe_first_value(article_surge_days, "date")
+        surge_change = int(safe_first_value(article_surge_days, "change", 0)) if not article_surge_days.empty else 0
+        card("최대 증가 날짜", surge_day, f"전일 대비 {surge_change:+,}건", "#ef4444")
 
-    section("일별 이벤트 영향")
-    st.dataframe(event_daily.sort_values("event_ratio", ascending=False), use_container_width=True)
-
-    section("이벤트 기사 제외 전후 핵심 키워드 비교")
-    non_event_df = df[~df["is_event_article"]].copy()
-    before = tfidf_keyword_scores(df, CORE_KEYWORDS, 15)[["keyword", "article_count", "tfidf_score"]]
-    after = tfidf_keyword_scores(non_event_df, CORE_KEYWORDS, 15)[["keyword", "article_count", "tfidf_score"]]
-
-    b1, b2 = st.columns(2)
-    with b1:
-        st.markdown("### 이벤트 포함")
-        st.dataframe(before, use_container_width=True)
-    with b2:
-        st.markdown("### 이벤트 제외")
-        st.dataframe(after, use_container_width=True)
-
-    insight_box("해석",
-        [
-            f"전체 기사 중 이벤트성 기사는 {event_total:,}건으로 약 {event_ratio}%입니다.",
-            "이벤트 제외 전후 키워드 순위가 크게 달라진다면, 해당 기간의 뉴스 흐름은 일반 트렌드보다 행사성 보도에 영향을 받은 것으로 볼 수 있습니다.",
-            "이 분석은 교수님 피드백의 '단일 이벤트 효과와 트렌드 변화를 구분해야 한다'는 지점을 보완합니다."
-        ]
-    )
-
-# =========================================================
-# 7. Relationship
-# =========================================================
-
-with tabs[6]:
-    st.subheader("키워드 관계 분석")
-    method_box("Co-occurrence Network Analysis", "같은 기사 안에서 함께 등장한 키워드 쌍을 분석하여 IT 이슈 간 연결 구조를 파악합니다.", "기사별 등장 키워드 조합 → 동시출현 빈도 계산", "동시출현 빈도가 높을수록 두 이슈가 같은 맥락에서 보도된 것으로 해석합니다.")
-
-    if net_df.empty:
-        st.warning("키워드 관계를 계산할 데이터가 부족합니다.")
+    section("일별 기사량 추이")
+    if not article_daily_df.empty:
+        st.line_chart(article_daily_df.set_index("date")[["article_count"]])
+        st.dataframe(article_daily_df.sort_values("date", ascending=False), use_container_width=True)
     else:
-        top_pair = net_df.iloc[0]
-        c1, c2, c3 = st.columns(3)
-        with c1:
-            card("최강 연결", f"{top_pair['keyword_a']} ↔ {top_pair['keyword_b']}", f"{int(top_pair['co_count']):,}건 동시출현")
-        with c2:
-            card("관계 수", f"{len(net_df):,}개", "키워드 페어 기준")
-        with c3:
-            nodes = len(set(net_df["keyword_a"]).union(set(net_df["keyword_b"])))
-            card("연결 키워드 수", f"{nodes:,}개", "네트워크 노드 기준")
+        st.warning("일별 기사량 데이터가 없습니다.")
 
-        components.html(network_html(net_df), height=720, scrolling=True)
-        st.dataframe(net_df.head(30), use_container_width=True)
+    section("날짜별 핵심 키워드 변화")
+    render_daily_keyword_timeline(daily_kw, top_n=5)
 
-        insight_box("해석",
-            [
-                f"가장 강한 연결은 '{top_pair['keyword_a']} ↔ {top_pair['keyword_b']}'입니다.",
-                "이는 두 키워드가 같은 기사 안에서 자주 함께 등장했다는 의미입니다.",
-                "따라서 단순히 개별 키워드가 많이 나온 것이 아니라, 이슈 간 관계 구조를 확인할 수 있습니다."
-            ]
-        )
+    section("기사량 급증일 해석")
+    if not article_surge_days.empty:
+        selected_date = st.selectbox("급증일 관련 기사 확인", article_surge_days["date"].tolist(), key="surge_date_select")
+        day_df = df[df[DATE_COL] == selected_date]
+        day_keywords = keyword_counts(day_df, MAIN_KEYWORDS).head(8)
+        progress_list(day_keywords, "keyword", "count", f"{selected_date} 주요 키워드", top_n=8)
+        compact_article_evidence(day_df, top_n=10)
+
 
 # =========================================================
-# 8. Risk
+# 4. Topic Shift
 # =========================================================
 
-with tabs[7]:
-    st.subheader("리스크 신호 분석")
-    method_box("Rule-based Sentiment/Risk Analysis", "성장·투자·출시 등 긍정 키워드와 해킹·유출·취약점 등 리스크 키워드를 비교해 보도 성향을 분류합니다.", "긍정 키워드 수 vs 리스크 키워드 수", "리스크 비중이 높은 토픽은 보안 사고나 규제 이슈 가능성이 높습니다.")
+with tab_topic:
+    st.subheader("Topic Shift")
+    st.caption("AI·반도체·보안·클라우드 등 주제군 비중이 기간별로 어떻게 바뀌었는지 분석합니다.")
 
-    sentiment_count = df["sentiment_group"].value_counts().reset_index()
-    sentiment_count.columns = ["sentiment", "count"]
-    sentiment_count["ratio"] = (sentiment_count["count"] / len(df) * 100).round(1)
+    topic_all = topic_counts(df)
+    topic_latest = topic_counts(latest_df)
 
-    c1, c2 = st.columns([1, 1])
+    c1, c2, c3 = st.columns(3)
     with c1:
-        st.dataframe(sentiment_count, use_container_width=True)
+        card("전체 1위 주제", safe_first_value(topic_all, "topic"), f"{int(safe_first_value(topic_all, 'count', 0)):,}건")
     with c2:
-        progress_list(sentiment_count, "sentiment", "count", "감성/리스크 분포", 5)
+        card("최신일 1위 주제", safe_first_value(topic_latest, "topic"), f"{int(safe_first_value(topic_latest, 'count', 0)):,}건")
+    with c3:
+        risk_topic = topic_sent_df.sort_values("risk_ratio", ascending=False).iloc[0] if not topic_sent_df.empty else None
+        card("리스크 비중 높은 주제", risk_topic["topic"] if risk_topic is not None else "-", f"{risk_topic['risk_ratio']}%" if risk_topic is not None else "-", "#ef4444")
 
-    topic_risk = df.pivot_table(index="primary_topic", columns="sentiment_group", values="title", aggfunc="count", fill_value=0).reset_index()
-    total_cols = [c for c in ["긍정/성장", "중립", "부정/리스크"] if c in topic_risk.columns]
-    topic_risk["total"] = topic_risk[total_cols].sum(axis=1)
-    if "부정/리스크" not in topic_risk.columns:
-        topic_risk["부정/리스크"] = 0
-    topic_risk["risk_ratio"] = (topic_risk["부정/리스크"] / topic_risk["total"] * 100).round(1)
-    topic_risk = topic_risk.sort_values("risk_ratio", ascending=False)
+    section("주제별 전체 비중")
+    progress_list(topic_all, "topic", "count", "전체 기간 주제 분포", top_n=8)
 
-    section("토픽별 리스크 비율")
-    st.dataframe(topic_risk, use_container_width=True)
+    section("주제별 일자 변화")
+    st.dataframe(topic_ts_df, use_container_width=True)
+    selected_topic = st.selectbox("상세 확인 주제", list(TOPIC_MAP.keys()), key="topic_shift_select")
+    topic_detail = topic_ts_df[["date", selected_topic]].sort_values("date")
+    st.line_chart(topic_detail.set_index("date")[[selected_topic]])
+    st.dataframe(topic_detail.sort_values(selected_topic, ascending=False), use_container_width=True)
 
-    risk_df = df[df["sentiment_group"] == "부정/리스크"]
-    insight_box("해석",
-        [
-            f"전체 기사 중 리스크 성향 기사는 {len(risk_df):,}건입니다.",
-            "리스크 비율이 높은 토픽은 해킹, 개인정보, 취약점, 장애 등 부정적 이슈와 더 밀접하게 연결되어 있습니다.",
-            "이를 통해 IT 뉴스 안에서 성장 이슈와 위험 신호를 분리해 확인할 수 있습니다."
-        ]
-    )
+    section("날짜별 지배 주제")
+    st.caption("각 날짜에 가장 많이 보도된 주제군을 요약합니다.")
+    st.dataframe(dominant_topic_df, use_container_width=True)
 
-    with st.expander("리스크 기사 근거 보기"):
-        article_table(risk_df, DATE_COL, n=100)
 
 # =========================================================
-# 9. Evidence
+# 5. Risk Signal
 # =========================================================
 
-with tabs[8]:
-    st.subheader("근거 기사")
-    st.caption("분석 결과의 근거가 되는 실제 기사 데이터를 확인하는 탭입니다. 앞쪽 탭은 분석 결과, 이 탭은 검증용 근거 데이터입니다.")
+with tab_risk:
+    st.subheader("Risk Signal")
+    st.caption("보안·해킹·개인정보 등 부정/리스크 신호를 따로 분리해 확인합니다.")
 
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        topic_filter = st.selectbox("토픽 필터", ["전체"] + sorted(df["primary_topic"].dropna().unique().tolist()))
-    with col2:
-        sentiment_filter = st.selectbox("성향 필터", ["전체"] + sorted(df["sentiment_group"].dropna().unique().tolist()))
-    with col3:
-        keyword_filter = st.text_input("키워드 검색", "")
+    risk_df = filter_keywords(df, risk_keywords)
+    latest_risk_df = filter_keywords(latest_df, risk_keywords)
+    neg_df = df[df["sentiment_group"] == "부정/리스크"]
+
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        card("리스크 키워드 기사", f"{len(risk_df):,}건", f"전체 대비 {risk_ratio}%", "#ef4444")
+    with c2:
+        card("최신일 리스크 기사", f"{len(latest_risk_df):,}건", f"{latest_date} 기준", "#ef4444")
+    with c3:
+        neg_ratio = round(len(neg_df) / len(df) * 100, 1) if len(df) else 0
+        card("부정/리스크 분류", f"{neg_ratio}%", f"{len(neg_df):,}건", "#ef4444")
+
+    section("주제별 리스크 비율")
+    st.dataframe(topic_sent_df.sort_values("risk_ratio", ascending=False), use_container_width=True)
+
+    section("리스크 키워드 TOP")
+    risk_keyword_df = keyword_counts(risk_df, risk_keywords)
+    progress_list(risk_keyword_df, "keyword", "count", "리스크 키워드 빈도", top_n=10)
+
+    section("리스크 기사 근거")
+    compact_article_evidence(risk_df, top_n=15)
+
+
+# =========================================================
+# 6. Source Bias
+# =========================================================
+
+with tab_source:
+    st.subheader("Source Bias")
+    st.caption("언론사/수집 출처별로 어떤 주제와 프레임이 강하게 나타나는지 비교합니다.")
+
+    source_count = df["analysis_source"].value_counts().reset_index()
+    source_count.columns = ["source", "count"]
+
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        card("수집 소스 수", f"{df['analysis_source'].nunique():,}개", "processed 데이터 기준")
+    with c2:
+        card("최다 기사 소스", safe_first_value(source_count, "source"), f"{int(safe_first_value(source_count, 'count', 0)):,}건")
+    with c3:
+        top_source_ratio = round(int(safe_first_value(source_count, "count", 0)) / len(df) * 100, 1) if len(df) else 0
+        card("상위 소스 집중도", f"{top_source_ratio}%", "전체 기사 중 1위 소스 비중")
+
+    section("소스별 기사량")
+    progress_list(source_count, "source", "count", "수집 소스별 기사 수", top_n=12)
+
+    section("소스별 주제 비중")
+    st.dataframe(source_topic_ratio(df), use_container_width=True)
+
+    section("소스별 보도 프레임")
+    frame_df = source_frame(df)
+    st.dataframe(frame_df, use_container_width=True)
+
+    selected_source = st.selectbox("소스별 기사 근거 확인", source_count["source"].tolist(), key="source_bias_select")
+    selected_source_df = df[df["analysis_source"] == selected_source]
+    progress_list(keyword_counts(selected_source_df, MAIN_KEYWORDS).head(8), "keyword", "count", f"{selected_source} 주요 키워드", top_n=8)
+    compact_article_evidence(selected_source_df, top_n=10)
+
+
+# =========================================================
+# 7. Issue Network
+# =========================================================
+
+with tab_network:
+    st.subheader("Issue Network")
+    st.caption("같은 기사 안에서 함께 등장한 키워드 쌍을 분석해 이슈 간 연결 구조를 보여줍니다.")
+
+    render_network_summary(net_df)
+
+    section("키워드 연결 그래프")
+    if not net_df.empty:
+        components.html(network_html(net_df), height=760, scrolling=True)
+    else:
+        st.warning("네트워크 그래프를 생성할 수 있는 데이터가 없습니다.")
+
+    section("강한 연결 관계")
+    render_strong_connections(net_df, top_n=6)
+
+    section("연결 데이터 상세")
+    st.dataframe(net_df.head(30), use_container_width=True)
+
+
+# =========================================================
+# 8. Evidence Table
+# =========================================================
+
+with tab_evidence:
+    st.subheader("Evidence Table")
+    st.caption("분석 결과를 뒷받침하는 기사 원문 데이터입니다. 발표 자료에 넣을 근거를 찾는 용도입니다.")
+
+    search_kw = st.text_input("기사 검색 키워드", "")
+    source_options = ["전체"] + sorted(df["analysis_source"].dropna().unique().tolist())
+    source_sel = st.selectbox("소스 필터", source_options)
 
     view = df.copy()
-    if topic_filter != "전체":
-        view = view[view["primary_topic"] == topic_filter]
-    if sentiment_filter != "전체":
-        view = view[view["sentiment_group"] == sentiment_filter]
-    if keyword_filter.strip():
-        view = filter_keyword(view, keyword_filter.strip())
+    if search_kw.strip():
+        view = filter_keyword(view, search_kw.strip())
+    if source_sel != "전체":
+        view = view[view["analysis_source"] == source_sel]
 
-    st.info(f"필터 적용 결과: {len(view):,}건")
-    article_table(view, DATE_COL, n=300)
+    c1, c2 = st.columns(2)
+    with c1:
+        card("검색 결과", f"{len(view):,}건", "현재 필터 기준")
+    with c2:
+        card("전체 데이터", f"{len(df):,}건", "processed CSV 기준")
+
+    article_table(view, DATE_COL)
