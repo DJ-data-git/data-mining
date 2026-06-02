@@ -1531,7 +1531,7 @@ with tab_risk:
 
     c1, c2, c3 = st.columns(3)
     with c1:
-        card("리스크 키워드 기사", f"{len(risk_df):,}건", f"전체 대비 {risk_ratio}%", "#ef4444")
+        card("리스크 키워드 기사", f"{len(risk_df):,}건", "전체 대비 " + str(risk_ratio) + "%", "#ef4444")
     with c2:
         card("최신일 리스크 기사", f"{len(latest_risk_df):,}건", f"{latest_date} 기준", "#ef4444")
     with c3:
