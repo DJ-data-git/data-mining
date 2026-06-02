@@ -1025,27 +1025,36 @@ def compact_article_evidence(df, keyword=None, top_n=8):
 
 
 def add_period_column(df, date_col, period_option):
-    """
-    Executive Summary에서 선택한 분석 단위에 따라 하위 집계 기준을 바꾸기 위한 함수.
-    일별/주별/월별/연별 선택값에 맞춰 analysis_period 컬럼을 생성한다.
-    """
     out = df.copy()
     dt = pd.to_datetime(out[date_col], errors="coerce")
 
     if period_option == "일별":
         out["analysis_period"] = dt.dt.strftime("%Y-%m-%d")
+        out["analysis_period_label"] = out["analysis_period"]
+
     elif period_option == "주별":
-        iso = dt.dt.isocalendar()
-        out["analysis_period"] = iso["year"].astype(str) + "-W" + iso["week"].astype(str).str.zfill(2)
+        week_start = dt - pd.to_timedelta(dt.dt.weekday, unit="D")
+        week_end = week_start + pd.Timedelta(days=6)
+        out["analysis_period"] = week_start.dt.strftime("%Y-%m-%d")
+        out["analysis_period_label"] = week_start.dt.strftime("%Y-%m-%d") + " ~ " + week_end.dt.strftime("%Y-%m-%d")
+
     elif period_option == "월별":
         out["analysis_period"] = dt.dt.strftime("%Y-%m")
+        out["analysis_period_label"] = dt.dt.year.astype("Int64").astype(str) + "년 " + dt.dt.month.astype("Int64").astype(str) + "월"
+
     elif period_option == "연별":
         out["analysis_period"] = dt.dt.strftime("%Y")
+        out["analysis_period_label"] = dt.dt.year.astype("Int64").astype(str) + "년"
+
     else:
         out["analysis_period"] = out[date_col].astype(str)
+        out["analysis_period_label"] = out["analysis_period"]
 
     out["analysis_period"] = out["analysis_period"].fillna("unknown")
+    out["analysis_period_label"] = out["analysis_period_label"].replace("<NA>년 <NA>월", "unknown").replace("<NA>년", "unknown").fillna(out["analysis_period"])
+
     return out
+
 
 
 def get_current_period_label(latest_date_value, period_option):
@@ -1200,8 +1209,11 @@ with tab_overview:
     )
 
     summary_df = add_period_column(df, DATE_COL, period_option)
+    summary_df = ensure_period_label_column(summary_df, "analysis_period", "analysis_period_label")
+
     PERIOD_COL = "analysis_period"
     PERIOD_LABEL_COL = "analysis_period_label"
+
     period_label_map = (
         summary_df[[PERIOD_COL, PERIOD_LABEL_COL]]
         .drop_duplicates()
