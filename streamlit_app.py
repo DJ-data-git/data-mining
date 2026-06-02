@@ -1025,6 +1025,14 @@ def compact_article_evidence(df, keyword=None, top_n=8):
 
 
 def add_period_column(df, date_col, period_option):
+    """
+    선택한 분석 단위에 따라 집계용 컬럼과 표시용 컬럼을 생성한다.
+
+    - 일별: 2026-06-02
+    - 주별: 2026-06-01 ~ 2026-06-07
+    - 월별: 2026년 6월
+    - 연별: 2026년
+    """
     out = df.copy()
     dt = pd.to_datetime(out[date_col], errors="coerce")
 
@@ -1036,11 +1044,20 @@ def add_period_column(df, date_col, period_option):
         week_start = dt - pd.to_timedelta(dt.dt.weekday, unit="D")
         week_end = week_start + pd.Timedelta(days=6)
         out["analysis_period"] = week_start.dt.strftime("%Y-%m-%d")
-        out["analysis_period_label"] = week_start.dt.strftime("%Y-%m-%d") + " ~ " + week_end.dt.strftime("%Y-%m-%d")
+        out["analysis_period_label"] = (
+            week_start.dt.strftime("%Y-%m-%d")
+            + " ~ "
+            + week_end.dt.strftime("%Y-%m-%d")
+        )
 
     elif period_option == "월별":
         out["analysis_period"] = dt.dt.strftime("%Y-%m")
-        out["analysis_period_label"] = dt.dt.year.astype("Int64").astype(str) + "년 " + dt.dt.month.astype("Int64").astype(str) + "월"
+        out["analysis_period_label"] = (
+            dt.dt.year.astype("Int64").astype(str)
+            + "년 "
+            + dt.dt.month.astype("Int64").astype(str)
+            + "월"
+        )
 
     elif period_option == "연별":
         out["analysis_period"] = dt.dt.strftime("%Y")
@@ -1050,56 +1067,31 @@ def add_period_column(df, date_col, period_option):
         out["analysis_period"] = out[date_col].astype(str)
         out["analysis_period_label"] = out["analysis_period"]
 
-    out["analysis_period"] = out["analysis_period"].fillna("unknown")
-    out["analysis_period_label"] = out["analysis_period_label"].replace("<NA>년 <NA>월", "unknown").replace("<NA>년", "unknown").fillna(out["analysis_period"])
+    out["analysis_period"] = out["analysis_period"].fillna("unknown").astype(str)
+    out["analysis_period_label"] = out["analysis_period_label"].fillna(out["analysis_period"]).astype(str)
+
+    out.loc[out["analysis_period_label"].str.contains("<NA>", na=False), "analysis_period_label"] = "unknown"
+    out.loc[out["analysis_period"].isin(["NaT", "nan", "None"]), "analysis_period"] = "unknown"
+    out.loc[out["analysis_period_label"].isin(["NaT", "nan", "None"]), "analysis_period_label"] = out["analysis_period"]
 
     return out
 
 
+def get_current_period_info(df, date_col, period_option):
+    """
+    데이터의 최신 날짜를 기준으로 현재 분석 구간의 group value와 label을 반환한다.
+    """
+    valid_dates = pd.to_datetime(df[date_col], errors="coerce").dropna()
 
-def get_current_period_label(latest_date_value, period_option):
-    dt = pd.to_datetime(latest_date_value, errors="coerce")
+    if valid_dates.empty:
+        return "-", "-"
 
-    if pd.isna(dt):
-        return "-"
+    latest_dt = valid_dates.max()
+    temp = pd.DataFrame({date_col: [latest_dt.strftime("%Y-%m-%d")]})
+    temp = add_period_column(temp, date_col, period_option)
 
-    if period_option == "일별":
-        return dt.strftime("%Y-%m-%d")
+    return temp["analysis_period"].iloc[0], temp["analysis_period_label"].iloc[0]
 
-    if period_option == "주별":
-        week_start = dt - pd.Timedelta(days=dt.weekday())
-        week_end = week_start + pd.Timedelta(days=6)
-        return f"{week_start.strftime('%Y-%m-%d')} ~ {week_end.strftime('%Y-%m-%d')}"
-
-    if period_option == "월별":
-        return f"{dt.year}년 {dt.month}월"
-
-    if period_option == "연별":
-        return f"{dt.year}년"
-
-    return dt.strftime("%Y-%m-%d")
-
-
-def get_period_group_value(latest_date_value, period_option):
-    dt = pd.to_datetime(latest_date_value, errors="coerce")
-
-    if pd.isna(dt):
-        return "-"
-
-    if period_option == "일별":
-        return dt.strftime("%Y-%m-%d")
-
-    if period_option == "주별":
-        week_start = dt - pd.Timedelta(days=dt.weekday())
-        return week_start.strftime("%Y-%m-%d")
-
-    if period_option == "월별":
-        return dt.strftime("%Y-%m")
-
-    if period_option == "연별":
-        return dt.strftime("%Y")
-
-    return dt.strftime("%Y-%m-%d")
 
 
 def period_article_summary(df, period_col="analysis_period"):
@@ -1209,8 +1201,6 @@ with tab_overview:
     )
 
     summary_df = add_period_column(df, DATE_COL, period_option)
-    summary_df = ensure_period_label_column(summary_df, "analysis_period", "analysis_period_label")
-
     PERIOD_COL = "analysis_period"
     PERIOD_LABEL_COL = "analysis_period_label"
 
