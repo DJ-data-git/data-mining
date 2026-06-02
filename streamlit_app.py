@@ -1048,6 +1048,51 @@ def add_period_column(df, date_col, period_option):
     return out
 
 
+def get_current_period_label(latest_date_value, period_option):
+    dt = pd.to_datetime(latest_date_value, errors="coerce")
+
+    if pd.isna(dt):
+        return "-"
+
+    if period_option == "일별":
+        return dt.strftime("%Y-%m-%d")
+
+    if period_option == "주별":
+        week_start = dt - pd.Timedelta(days=dt.weekday())
+        week_end = week_start + pd.Timedelta(days=6)
+        return f"{week_start.strftime('%Y-%m-%d')} ~ {week_end.strftime('%Y-%m-%d')}"
+
+    if period_option == "월별":
+        return f"{dt.year}년 {dt.month}월"
+
+    if period_option == "연별":
+        return f"{dt.year}년"
+
+    return dt.strftime("%Y-%m-%d")
+
+
+def get_period_group_value(latest_date_value, period_option):
+    dt = pd.to_datetime(latest_date_value, errors="coerce")
+
+    if pd.isna(dt):
+        return "-"
+
+    if period_option == "일별":
+        return dt.strftime("%Y-%m-%d")
+
+    if period_option == "주별":
+        week_start = dt - pd.Timedelta(days=dt.weekday())
+        return week_start.strftime("%Y-%m-%d")
+
+    if period_option == "월별":
+        return dt.strftime("%Y-%m")
+
+    if period_option == "연별":
+        return dt.strftime("%Y")
+
+    return dt.strftime("%Y-%m-%d")
+
+
 def period_article_summary(df, period_col="analysis_period"):
     if df.empty or period_col not in df.columns:
         return pd.DataFrame(columns=[period_col, "article_count", "prev_count", "change", "change_rate"])
@@ -1156,6 +1201,13 @@ with tab_overview:
 
     summary_df = add_period_column(df, DATE_COL, period_option)
     PERIOD_COL = "analysis_period"
+    PERIOD_LABEL_COL = "analysis_period_label"
+    period_label_map = (
+        summary_df[[PERIOD_COL, PERIOD_LABEL_COL]]
+        .drop_duplicates()
+        .set_index(PERIOD_COL)[PERIOD_LABEL_COL]
+        .to_dict()
+    )
 
     period_summary_df = period_article_summary(summary_df, PERIOD_COL)
     period_top_df = period_summary_df.sort_values("article_count", ascending=False).head(5)
@@ -1176,8 +1228,8 @@ with tab_overview:
 
     min_date = df[DATE_COL].min()
     max_date = df[DATE_COL].max()
-    min_period = periods[0] if periods else "-"
-    max_period = periods[-1] if periods else "-"
+    current_period_label = get_current_period_label(max_date, period_option)
+    current_period_value = get_period_group_value(max_date, period_option)
     total_periods = summary_df[PERIOD_COL].nunique()
     total_articles = len(summary_df)
     current_articles = len(current_period_df)
@@ -1193,7 +1245,7 @@ with tab_overview:
 
     c1, c2, c3, c4 = st.columns(4)
     with c1:
-        card("분석 범위", f"{min_period} ~ {max_period}", f"원본 날짜 {min_date} ~ {max_date} / {period_option} 기준 {total_periods:,}개 구간")
+        card("현재 분석 구간", current_period_label, f"원본 수집 범위 {min_date} ~ {max_date} / {period_option} 기준 {total_periods:,}개 구간")
     with c2:
         card("전체 기사 수", f"{total_articles:,}건", f"현재 구간 {current_period}: {current_articles:,}건")
     with c3:
@@ -1213,8 +1265,8 @@ with tab_overview:
     render_insight_box(
         f"{period_option} 기준 IT 뉴스 흐름",
         [
-            f"선택한 분석 단위는 '{period_option}'이며, 분석 범위는 {min_period} ~ {max_period} 기준으로 표시됩니다.",
-            f"원본 수집 날짜 범위는 {min_date} ~ {max_date}이며, 선택한 단위에 따라 일/주/월/연 구간으로 재집계됩니다.",
+            f"선택한 분석 단위는 '{period_option}'이며, 현재 분석 구간은 '{current_period_label}'입니다.",
+            f"원본 수집 날짜 범위는 {min_date} ~ {max_date}이며, 선택한 단위에 따라 당일/해당 주/해당 월/해당 연도 기준으로 재집계됩니다.",
             f"전체 범위에서 가장 강한 키워드는 '{top_keyword}'이며, 총 {top_keyword_count:,}건 확인됩니다.",
             f"기사량이 가장 집중된 구간은 {peak_period}이며, 해당 구간 기사 수는 {peak_count:,}건입니다.",
             f"현재 구간({current_period})의 핵심 키워드는 '{current_top_kw}', 핵심 주제는 '{current_top_topic}'입니다.",
