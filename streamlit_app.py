@@ -1191,7 +1191,7 @@ tab_overview, tab_keyword, tab_time, tab_topic, tab_risk, tab_source, tab_networ
 
 with tab_overview:
     st.subheader("Executive Summary")
-    st.caption("분석 단위를 선택하면 아래 요약 지표, 키워드, 주제, 변화 신호가 같은 기준으로 재계산됩니다.")
+    st.caption("분석 단위를 선택하면 기사 수, 핵심 키워드, 주제, 리스크 비중이 모두 같은 기준으로 다시 계산됩니다.")
 
     period_option = st.selectbox(
         "분석 단위 선택",
@@ -1200,6 +1200,9 @@ with tab_overview:
         key="summary_period_option"
     )
 
+    # -----------------------------------------------------
+    # 1) 선택한 단위 기준으로 기간 컬럼 생성
+    # -----------------------------------------------------
     summary_df = add_period_column(df, DATE_COL, period_option)
     PERIOD_COL = "analysis_period"
     PERIOD_LABEL_COL = "analysis_period_label"
@@ -1211,26 +1214,61 @@ with tab_overview:
         .to_dict()
     )
 
+    periods = sorted([p for p in summary_df[PERIOD_COL].dropna().unique().tolist() if p != "unknown"])
+    current_period = periods[-1] if periods else None
+    previous_period = periods[-2] if len(periods) >= 2 else None
+
+    current_period_label = period_label_map.get(current_period, current_period or "-")
+    previous_period_label = period_label_map.get(previous_period, previous_period or "-")
+
+    # -----------------------------------------------------
+    # 2) 가장 중요한 부분: 선택한 현재 구간만 필터링
+    #    아래 모든 Summary 지표는 active_df 기준으로 계산
+    # -----------------------------------------------------
+    if current_period:
+        active_df = summary_df[summary_df[PERIOD_COL] == current_period].copy()
+    else:
+        active_df = summary_df.head(0).copy()
+
+    if previous_period:
+        previous_df = summary_df[summary_df[PERIOD_COL] == previous_period].copy()
+    else:
+        previous_df = summary_df.head(0).copy()
+
+    # -----------------------------------------------------
+    # 3) 현재 구간 기준 지표 계산
+    # -----------------------------------------------------
+    min_date = df[DATE_COL].min()
+    max_date = df[DATE_COL].max()
+    total_articles = len(summary_df)
+    active_articles = len(active_df)
+    total_periods = len(periods)
+
+    active_keyword_df = keyword_counts(active_df, MAIN_KEYWORDS).head(10)
+    active_topic_df = topic_counts(active_df).head(10)
+
+    active_top_keyword = safe_first_value(active_keyword_df, "keyword")
+    active_top_keyword_count = int(safe_first_value(active_keyword_df, "count", 0)) if not active_keyword_df.empty else 0
+
+    active_top_topic = safe_first_value(active_topic_df, "topic")
+    active_top_topic_count = int(safe_first_value(active_topic_df, "count", 0)) if not active_topic_df.empty else 0
+
+    risk_keywords = ["보안", "해킹", "개인정보", "랜섬웨어", "침해", "취약점"]
+    active_risk_count = len(filter_keywords(active_df, risk_keywords))
+    active_risk_ratio = round(active_risk_count / active_articles * 100, 1) if active_articles else 0
+
+    # -----------------------------------------------------
+    # 4) 기간별 기사 수/증감 계산
+    # -----------------------------------------------------
     period_summary_df = period_article_summary(summary_df, PERIOD_COL)
     if not period_summary_df.empty:
         period_summary_df["period_label"] = period_summary_df[PERIOD_COL].map(period_label_map).fillna(period_summary_df[PERIOD_COL])
+    else:
+        period_summary_df = pd.DataFrame(columns=[PERIOD_COL, "article_count", "prev_count", "change", "change_rate", "period_label"])
 
     period_top_df = period_summary_df.sort_values("article_count", ascending=False).head(5)
     period_surge_df = period_summary_df.sort_values("change", ascending=False).head(5)
 
-    periods = sorted(summary_df[PERIOD_COL].dropna().unique())
-    current_period = periods[-1] if periods else "-"
-    prev_period = periods[-2] if len(periods) >= 2 else "-"
-    current_period_label = period_label_map.get(current_period, current_period)
-    prev_period_label = period_label_map.get(prev_period, prev_period)
-
-    current_period_df = summary_df[summary_df[PERIOD_COL] == current_period].copy() if periods else summary_df.copy()
-    prev_period_df = summary_df[summary_df[PERIOD_COL] == prev_period].copy() if len(periods) >= 2 else pd.DataFrame()
-
-    period_all_keyword_df = keyword_counts(summary_df, MAIN_KEYWORDS).head(15)
-    period_current_keyword_df = keyword_counts(current_period_df, MAIN_KEYWORDS).head(10)
-    period_topic_all_df = topic_counts(summary_df)
-    period_current_topic_df = topic_counts(current_period_df)
     period_movers_df = period_keyword_movers(summary_df, PERIOD_COL, MAIN_KEYWORDS, top_n=10)
     if not period_movers_df.empty:
         period_movers_df["current_period_label"] = period_movers_df["current_period"].map(period_label_map).fillna(period_movers_df["current_period"])
@@ -1240,51 +1278,65 @@ with tab_overview:
     if not period_topic_ts_df.empty:
         period_topic_ts_df["period_label"] = period_topic_ts_df["period"].map(period_label_map).fillna(period_topic_ts_df["period"])
 
-    min_date = df[DATE_COL].min()
-    max_date = df[DATE_COL].max()
-    total_periods = summary_df[PERIOD_COL].nunique()
-    total_articles = len(summary_df)
-    current_articles = len(current_period_df)
-
-    top_keyword = safe_first_value(period_all_keyword_df, "keyword")
-    top_keyword_count = int(safe_first_value(period_all_keyword_df, "count", 0)) if not period_all_keyword_df.empty else 0
-    top_topic = safe_first_value(period_topic_all_df, "topic")
-    top_topic_count = int(safe_first_value(period_topic_all_df, "count", 0)) if not period_topic_all_df.empty else 0
-
-    risk_keywords = ["보안", "해킹", "개인정보", "랜섬웨어", "침해", "취약점"]
-    risk_count = len(filter_keywords(summary_df, risk_keywords))
-    risk_ratio = round(risk_count / total_articles * 100, 1) if total_articles else 0
-
+    # -----------------------------------------------------
+    # 5) 상단 카드: 모두 active_df 기준
+    # -----------------------------------------------------
     c1, c2, c3, c4 = st.columns(4)
     with c1:
-        card("현재 분석 구간", current_period_label, f"원본 수집 범위 {min_date} ~ {max_date} / {period_option} 기준 {total_periods:,}개 구간")
+        card(
+            "현재 분석 구간",
+            current_period_label,
+            f"원본 수집 범위 {min_date} ~ {max_date} / {period_option} 기준 {total_periods:,}개 구간"
+        )
     with c2:
-        card("전체 기사 수", f"{total_articles:,}건", f"현재 구간 {current_period_label}: {current_articles:,}건")
+        card(
+            "현재 구간 기사 수",
+            f"{active_articles:,}건",
+            f"전체 수집 기사 {total_articles:,}건 중 현재 {period_option} 구간만 계산"
+        )
     with c3:
-        card("핵심 키워드", top_keyword, f"{period_option} 재집계 기준 {top_keyword_count:,}건")
+        card(
+            "현재 구간 핵심 키워드",
+            active_top_keyword,
+            f"{current_period_label} 기준 {active_top_keyword_count:,}건"
+        )
     with c4:
-        card("리스크 기사 비중", f"{risk_ratio}%", f"보안/개인정보 계열 {risk_count:,}건", "#ef4444")
+        card(
+            "현재 구간 리스크 비중",
+            f"{active_risk_ratio}%",
+            f"보안/개인정보 계열 {active_risk_count:,}건",
+            "#ef4444"
+        )
 
-    section("분석 단위 기준 핵심 해석")
+    section("현재 선택 구간 기준 핵심 해석")
 
-    top_surge_kw = safe_first_value(period_movers_df, "keyword")
-    top_surge_change = int(safe_first_value(period_movers_df, "change", 0)) if not period_movers_df.empty else 0
     peak_period = safe_first_value(period_top_df, "period_label")
     peak_count = int(safe_first_value(period_top_df, "article_count", 0)) if not period_top_df.empty else 0
-    current_top_kw = safe_first_value(period_current_keyword_df, "keyword")
-    current_top_topic = safe_first_value(period_current_topic_df, "topic")
+    top_surge_kw = safe_first_value(period_movers_df, "keyword")
+    top_surge_change = int(safe_first_value(period_movers_df, "change", 0)) if not period_movers_df.empty else 0
 
     render_insight_box(
-        f"{period_option} 기준 IT 뉴스 흐름",
+        f"{period_option} 기준 IT 뉴스 분석 결과",
         [
-            f"선택한 분석 단위는 '{period_option}'이며, 현재 분석 구간은 '{current_period_label}'입니다.",
-            f"원본 수집 날짜 범위는 {min_date} ~ {max_date}이며, 선택한 단위에 따라 당일/해당 주/해당 월/해당 연도 기준으로 재집계됩니다.",
-            f"전체 범위에서 가장 강한 키워드는 '{top_keyword}'이며, 총 {top_keyword_count:,}건 확인됩니다.",
-            f"기사량이 가장 집중된 구간은 {peak_period}이며, 해당 구간 기사 수는 {peak_count:,}건입니다.",
-            f"현재 구간({current_period_label})의 핵심 키워드는 '{current_top_kw}', 핵심 주제는 '{current_top_topic}'입니다.",
-            f"직전 구간 대비 가장 크게 증가한 키워드는 '{top_surge_kw}'이며, 변화량은 {top_surge_change:+,}건입니다.",
+            f"현재 분석 구간은 '{current_period_label}'이며, 이 구간만 필터링하여 핵심 지표를 다시 계산했습니다.",
+            f"현재 구간 기사 수는 {active_articles:,}건입니다.",
+            f"현재 구간의 핵심 키워드는 '{active_top_keyword}'이며, {active_top_keyword_count:,}건 확인됩니다.",
+            f"현재 구간의 핵심 주제는 '{active_top_topic}'이며, {active_top_topic_count:,}건 관련 기사가 확인됩니다.",
+            f"현재 구간 리스크 기사 비중은 {active_risk_ratio}%입니다.",
+            f"기사량이 가장 집중된 {period_option} 구간은 {peak_period}이며, 해당 구간 기사 수는 {peak_count:,}건입니다.",
+            f"직전 구간({previous_period_label}) 대비 가장 크게 증가한 키워드는 '{top_surge_kw}'이며, 변화량은 {top_surge_change:+,}건입니다.",
         ]
     )
+
+    # 확인용: 실제 필터가 바뀌는지 바로 검증 가능하게 표시
+    with st.expander("현재 구간 필터 검증"):
+        check_cols = [c for c in [DATE_COL, PERIOD_COL, PERIOD_LABEL_COL, "title"] if c in active_df.columns]
+        st.write(f"현재 분석 단위: {period_option}")
+        st.write(f"현재 period value: {current_period}")
+        st.write(f"현재 period label: {current_period_label}")
+        st.write(f"active_df 기사 수: {len(active_df):,}건")
+        if check_cols:
+            st.dataframe(active_df[check_cols].head(20), use_container_width=True)
 
     section("분석 단위별 기사량 변화")
     col_a, col_b = st.columns(2)
@@ -1300,19 +1352,19 @@ with tab_overview:
         st.markdown("### 증가폭 TOP 5")
         st.dataframe(period_surge_df, use_container_width=True)
 
-    section("분석 단위 기준 키워드/주제 결과")
+    section(f"현재 {period_option} 구간 기준 키워드/주제 결과")
+    st.caption("아래 키워드와 주제는 전체 기간이 아니라 현재 선택 구간(active_df) 기준으로만 계산됩니다.")
+
     col_c, col_d = st.columns(2)
     with col_c:
-        progress_list(period_all_keyword_df.head(10), "keyword", "count", f"전체 범위 핵심 키워드 TOP 10", top_n=10)
-        st.markdown(f"### 현재 구간({current_period_label}) 핵심 키워드")
-        st.dataframe(period_current_keyword_df, use_container_width=True)
+        progress_list(active_keyword_df, "keyword", "count", f"현재 구간({current_period_label}) 키워드 TOP 10", top_n=10)
+        st.dataframe(active_keyword_df, use_container_width=True)
     with col_d:
-        progress_list(period_topic_all_df.head(8), "topic", "count", f"전체 범위 핵심 주제", top_n=8)
-        st.markdown(f"### 현재 구간({current_period_label}) 핵심 주제")
-        st.dataframe(period_current_topic_df, use_container_width=True)
+        progress_list(active_topic_df, "topic", "count", f"현재 구간({current_period_label}) 주제 TOP", top_n=10)
+        st.dataframe(active_topic_df, use_container_width=True)
 
     section("직전 구간 대비 키워드 변화")
-    st.caption(f"{prev_period_label} → {current_period_label} 기준으로 키워드 증가/감소를 계산합니다.")
+    st.caption(f"{previous_period_label} → {current_period_label} 기준으로 키워드 증가/감소를 계산합니다.")
     if period_movers_df.empty:
         st.warning("비교 가능한 이전 구간이 부족합니다. 데이터가 더 쌓이면 변화 분석이 가능합니다.")
     else:
@@ -1324,16 +1376,21 @@ with tab_overview:
         st.warning("주제별 구간 변화 데이터가 없습니다.")
     else:
         st.dataframe(period_topic_ts_df, use_container_width=True)
-        selected_period_topic = st.selectbox("상세 확인 주제", sorted(period_topic_ts_df["topic"].dropna().unique().tolist()), key="summary_period_topic_select")
-        topic_line_df = period_topic_ts_df[period_topic_ts_df["topic"] == selected_period_topic].sort_values("period")
-        st.line_chart(topic_line_df.set_index("period_label")[["count"]])
+        selected_period_topic = st.selectbox(
+            "상세 확인 주제",
+            sorted(period_topic_ts_df["topic"].dropna().unique().tolist()),
+            key="summary_period_topic_select"
+        )
+        st.dataframe(
+            period_topic_ts_df[period_topic_ts_df["topic"] == selected_period_topic].sort_values("period", ascending=False),
+            use_container_width=True
+        )
 
-    section("발표용 설명")
     st.info(f"""
-    시기별 분석의 기준을 명확히 하기 위해 분석 단위를 일별·주별·월별·연별로 선택할 수 있도록 구성했습니다.
-    현재 화면에서는 '{period_option}' 기준으로 기사량, 키워드 순위, 주제 분포, 직전 구간 대비 변화량이 함께 재계산됩니다.
-    따라서 단순히 고정된 기간 요약이 아니라, 사용자가 정의한 시간 단위에 따라 IT 뉴스 흐름을 비교할 수 있습니다.
+    현재 Summary는 '{period_option}' 기준으로 최신 구간({current_period_label})만 active_df로 필터링한 뒤,
+    기사 수, 키워드 순위, 주제 분포, 리스크 비중을 모두 active_df 기준으로 재계산합니다.
     """)
+
 
 # =========================================================
 # 2. Keyword Diagnosis
