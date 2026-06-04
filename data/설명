@@ -1,1 +1,40 @@
 
+## data 폴더 설명
+
+본 폴더는 IT 뉴스 분석 프로젝트에서 수집 및 전처리한 데이터를 저장하는 공간이다.
+
+데이터는 AWS Lambda를 활용하여 네이버 뉴스 API, Google News RSS, 언론사 RSS 등 다양한 소스로부터 자동 수집되었으며, AWS S3를 통해 저장 및 관리된다.
+
+### 데이터 구성
+
+* Raw Data
+
+  * 뉴스 수집 직후의 원본 데이터
+  * 기사 제목, 요약, 링크, 발행일, 언론사 정보 포함
+
+* Processed Data
+
+  * HTML 태그 제거
+  * 불용어(Stopwords) 제거
+  * 중복 기사 제거
+  * IT 관련 기사 필터링
+  * 분석에 활용 가능한 형태로 가공된 데이터
+
+### 활용 목적
+
+본 데이터는 다음과 같은 데이터 마이닝 분석에 활용된다.
+
+* 키워드 빈도 분석 (Keyword Frequency Analysis)
+* 시계열 분석 (Time Series Analysis)
+* 주제 분류 분석 (Topic Analysis)
+* 리스크 키워드 분석 (Risk Keyword Analysis)
+* 동시출현 분석 (Co-occurrence Analysis)
+
+### 데이터 수집 기간
+
+* 수집 기간: 2026-05-14 ~ 현재
+* 수집 주기: AWS Lambda 기반 자동 수집
+
+### 참고사항
+
+본 데이터는 IT 뉴스 동향 분석을 목적으로 수집되었으며, 분석 결과는 Streamlit 기반 대시보드에서 시각화 및 탐색할 수 있다.
