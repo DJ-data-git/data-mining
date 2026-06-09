@@ -587,6 +587,113 @@ def infer_topic_name(top_words):
     return "기타 토픽"
 
 
+
+def compute_article_similarity(df, top_n=30, threshold=0.45):
+    """
+    TF-IDF + Cosine Similarity 기반 유사 기사 분석.
+    제목+요약문을 벡터화한 뒤 기사 간 코사인 유사도를 계산한다.
+    threshold 이상인 기사쌍을 유사 기사 후보로 본다.
+    """
+    if df.empty or len(df) < 2:
+        return pd.DataFrame(columns=[
+            "article_a_index", "article_b_index", "similarity",
+            "date_a", "source_a", "title_a",
+            "date_b", "source_b", "title_b"
+        ])
+
+    working_df = df.reset_index(drop=True).copy()
+    docs = text_series(working_df).map(clean_for_vectorize).tolist()
+
+    valid_pairs = [(idx, doc) for idx, doc in enumerate(docs) if str(doc).strip()]
+    if len(valid_pairs) < 2:
+        return pd.DataFrame(columns=[
+            "article_a_index", "article_b_index", "similarity",
+            "date_a", "source_a", "title_a",
+            "date_b", "source_b", "title_b"
+        ])
+
+    valid_indices = [idx for idx, _ in valid_pairs]
+    valid_docs = [doc for _, doc in valid_pairs]
+
+    vectorizer = TfidfVectorizer(
+        max_features=1500,
+        stop_words=STOPWORDS,
+        token_pattern=r"(?u)\b[가-힣A-Za-z0-9+#.-]{2,}\b"
+    )
+
+    try:
+        mat = vectorizer.fit_transform(valid_docs)
+        sim = cosine_similarity(mat)
+    except ValueError:
+        return pd.DataFrame(columns=[
+            "article_a_index", "article_b_index", "similarity",
+            "date_a", "source_a", "title_a",
+            "date_b", "source_b", "title_b"
+        ])
+
+    rows = []
+    n = sim.shape[0]
+
+    for i in range(n):
+        for j in range(i + 1, n):
+            score = float(sim[i, j])
+            if score >= threshold:
+                idx_a = valid_indices[i]
+                idx_b = valid_indices[j]
+                a = working_df.iloc[idx_a]
+                b = working_df.iloc[idx_b]
+
+                rows.append({
+                    "article_a_index": idx_a,
+                    "article_b_index": idx_b,
+                    "similarity": round(score, 4),
+                    "date_a": a.get("analysis_date", ""),
+                    "source_a": a.get("analysis_source", ""),
+                    "title_a": a.get("title", ""),
+                    "date_b": b.get("analysis_date", ""),
+                    "source_b": b.get("analysis_source", ""),
+                    "title_b": b.get("title", "")
+                })
+
+    if not rows:
+        return pd.DataFrame(columns=[
+            "article_a_index", "article_b_index", "similarity",
+            "date_a", "source_a", "title_a",
+            "date_b", "source_b", "title_b"
+        ])
+
+    return (
+        pd.DataFrame(rows)
+        .sort_values("similarity", ascending=False)
+        .head(top_n)
+        .reset_index(drop=True)
+    )
+
+
+def similarity_summary(sim_df, article_count):
+    """
+    유사 기사 분석 결과 요약.
+    """
+    if sim_df.empty or article_count == 0:
+        return {
+            "similar_pair_count": 0,
+            "max_similarity": 0,
+            "avg_similarity": 0,
+            "involved_articles": 0,
+            "involved_ratio": 0
+        }
+
+    involved = set(sim_df["article_a_index"].tolist()) | set(sim_df["article_b_index"].tolist())
+
+    return {
+        "similar_pair_count": len(sim_df),
+        "max_similarity": round(float(sim_df["similarity"].max()), 4),
+        "avg_similarity": round(float(sim_df["similarity"].mean()), 4),
+        "involved_articles": len(involved),
+        "involved_ratio": round(len(involved) / article_count * 100, 1) if article_count else 0
+    }
+
+
 def article_table(df, date_col="analysis_date", n=200):
     cols = [c for c in [date_col, "analysis_source", "source_group", "primary_topic", "sentiment_group", "title", "description", "originallink", "link"] if c in df.columns]
     view = df.sort_values(date_col, ascending=False).head(n) if date_col in df.columns else df.head(n)
@@ -664,6 +771,9 @@ if not network_keywords:
 
 net_df = keyword_network(active_df if len(active_df) else df, network_keywords)
 
+active_similarity_df = compute_article_similarity(active_df, top_n=50, threshold=0.45)
+active_similarity_summary = similarity_summary(active_similarity_df, len(active_df))
+
 lda_docs = text_series(active_df if len(active_df) >= 20 else df).tolist()
 lda_topic_df, lda_doc_topics = lda_topic_modeling(lda_docs, n_topics=5, n_words=8)
 if not lda_topic_df.empty:
@@ -693,6 +803,10 @@ top_sentiment = safe_top(sentiment_df, "sentiment")
 top_pair = f"{net_df.iloc[0]['keyword_a']} ↔ {net_df.iloc[0]['keyword_b']}" if not net_df.empty else "-"
 top_pair_count = int(net_df.iloc[0]["co_count"]) if not net_df.empty else 0
 
+similar_pair_count = active_similarity_summary["similar_pair_count"]
+similar_involved_ratio = active_similarity_summary["involved_ratio"]
+max_similarity = active_similarity_summary["max_similarity"]
+
 top_lda_topic = safe_top(lda_topic_df, "estimated_topic_name")
 top_lda_words = safe_top(lda_topic_df, "top_words")
 
@@ -700,14 +814,15 @@ top_lda_words = safe_top(lda_topic_df, "top_words")
 # Tabs
 # =========================================================
 
-tab_summary, tab_importance, tab_trend, tab_risk, tab_network, tab_lda, tab_evidence = st.tabs([
+tab_summary, tab_importance, tab_trend, tab_risk, tab_network, tab_lda, tab_similarity, tab_evidence = st.tabs([
     "1. 분석 단위별 핵심 요약",
     "2. 많이 언급된 키워드 vs 특징 키워드",
     "3. 급부상 이슈 분석",
     "4. 주제별 리스크 분석",
     "5. 함께 움직이는 기술 관계",
     "6. LDA 잠재 토픽 탐색",
-    "7. 근거 기사"
+    "7. 유사 기사 분석",
+    "8. 근거 기사"
 ])
 
 # =========================================================
@@ -717,9 +832,9 @@ tab_summary, tab_importance, tab_trend, tab_risk, tab_network, tab_lda, tab_evid
 with tab_summary:
     analysis_header(
         "선택한 분석 단위에서 핵심적으로 무엇이 발견되었는가?",
-        "Descriptive Analytics + TF-IDF + Time Series + Sentiment/Risk + Co-occurrence + LDA",
+        "Descriptive Analytics + TF-IDF + Time Series + Sentiment/Risk + Co-occurrence + LDA + Cosine Similarity",
         "일/주/월/연 분석 단위가 바뀌면 현재 구간 데이터도 바뀌므로, 해당 구간에서 발견된 핵심 이슈를 자동 요약해야 합니다.",
-        "현재 구간의 최다 키워드, 특징 키워드, 급부상 키워드, 리스크 신호, 연결 관계, 잠재 토픽"
+        "현재 구간의 최다 키워드, 특징 키워드, 급부상 키워드, 리스크 신호, 연결 관계, 잠재 토픽, 유사 기사 반복 여부"
     )
 
     min_date = df[DATE_COL].min()
@@ -735,14 +850,23 @@ with tab_summary:
     with c4:
         card("리스크 기사 비중", f"{risk_ratio}%", f"리스크 기사 {len(risk_df):,}건", "#ef4444")
 
-    section("현재 구간 핵심 발견 TOP 6")
+    s1, s2, s3 = st.columns(3)
+    with s1:
+        card("유사 기사쌍", f"{similar_pair_count:,}쌍", "TF-IDF + Cosine Similarity 기준")
+    with s2:
+        card("유사 기사 포함 비율", f"{similar_involved_ratio}%", "현재 구간 기사 중 유사 기사 후보 비율")
+    with s3:
+        card("최대 유사도", f"{max_similarity}", "가장 유사한 기사쌍의 cosine similarity")
+
+    section("현재 구간 핵심 발견 TOP 7")
     insight_box("핵심 발견", [
         f"최다 언급 이슈는 '{top_frequency_keyword}'입니다. 현재 구간에서 {top_frequency_count:,}건 등장했습니다.",
         f"TF-IDF 기준 특징 키워드는 '{top_tfidf_keyword}'입니다. 단순 빈도와 별도로 현재 뉴스 구간을 특징짓는 단어입니다.",
         f"직전 구간 대비 가장 크게 증가한 키워드는 '{top_change_keyword}'이며 변화량은 {top_change_value:+,}건입니다.",
         f"주제 분류 기준 가장 큰 비중은 '{top_topic}'이며 전체의 {top_topic_ratio}%입니다.",
         f"동시출현 분석 기준 가장 강한 연결 관계는 '{top_pair}'이며 {top_pair_count:,}건 함께 등장했습니다.",
-        f"LDA 탐색 결과 주요 잠재 토픽은 '{top_lda_topic}'으로 추정되며 대표 단어는 '{top_lda_words}'입니다."
+        f"LDA 탐색 결과 주요 잠재 토픽은 '{top_lda_topic}'으로 추정되며 대표 단어는 '{top_lda_words}'입니다.",
+        f"유사 기사 분석 결과 현재 구간에서 유사 기사쌍은 {similar_pair_count:,}쌍이며, 유사 기사 후보에 포함된 기사 비율은 {similar_involved_ratio}%입니다."
     ])
 
     section("요약 근거 데이터")
@@ -1007,8 +1131,76 @@ with tab_lda:
             "현재 수집 기간이 짧기 때문에 향후 데이터가 누적되면 토픽 안정성을 다시 검증해야 합니다."
         ])
 
+
 # =========================================================
-# 7. Evidence
+# 7. Similarity
+# =========================================================
+
+with tab_similarity:
+    analysis_header(
+        "제목은 다르지만 내용이 유사한 반복 기사는 얼마나 있는가?",
+        "TF-IDF Vectorization + Cosine Similarity",
+        "뉴스 데이터는 같은 이슈가 여러 매체에서 반복 보도되는 경우가 많다. 단순 기사 수만 보면 실제 정보 다양성이 과대평가될 수 있으므로 기사 간 유사도를 계산한다.",
+        "유사 기사쌍, 최대 유사도, 유사 기사 포함 비율, 유사 기사 근거"
+    )
+
+    threshold = st.slider(
+        "유사도 기준값",
+        min_value=0.20,
+        max_value=0.90,
+        value=0.45,
+        step=0.05,
+        help="값이 낮을수록 더 많은 기사쌍이 유사 기사 후보로 잡히고, 값이 높을수록 매우 비슷한 기사만 잡힙니다."
+    )
+
+    sim_df = compute_article_similarity(active_df, top_n=100, threshold=threshold)
+    sim_summary = similarity_summary(sim_df, len(active_df))
+
+    c1, c2, c3, c4 = st.columns(4)
+    with c1:
+        card("유사 기사쌍", f"{sim_summary['similar_pair_count']:,}쌍", f"유사도 {threshold} 이상")
+    with c2:
+        card("유사 기사 포함 비율", f"{sim_summary['involved_ratio']}%", "현재 구간 기사 중 유사 기사 후보 비율")
+    with c3:
+        card("최대 유사도", f"{sim_summary['max_similarity']}", "가장 유사한 기사쌍")
+    with c4:
+        card("평균 유사도", f"{sim_summary['avg_similarity']}", "탐지된 유사 기사쌍 평균")
+
+    section("유사 기사 분석 결과")
+    if sim_df.empty:
+        st.warning("현재 기준값 이상으로 유사한 기사쌍이 탐지되지 않았습니다. 기준값을 낮추면 더 많은 후보를 확인할 수 있습니다.")
+    else:
+        st.dataframe(sim_df, use_container_width=True)
+
+        top_sim = sim_df.iloc[0]
+        insight_box("분석 해석", [
+            f"현재 분석 구간에서 유사도 {threshold} 이상인 기사쌍은 {sim_summary['similar_pair_count']:,}쌍입니다.",
+            f"가장 높은 유사도는 {sim_summary['max_similarity']}이며, 이는 제목이나 요약문이 매우 비슷한 기사쌍이 존재한다는 의미입니다.",
+            f"유사 기사 후보에 포함된 기사는 전체의 {sim_summary['involved_ratio']}%입니다.",
+            "이 분석은 단순 기사 수가 실제 정보 다양성을 그대로 의미하지 않을 수 있음을 확인하기 위한 보완 분석입니다.",
+            "따라서 뉴스 데이터 분석 시 중복 기사뿐 아니라 내용이 유사한 반복 기사도 고려해야 합니다."
+        ])
+
+        section("가장 유사한 기사쌍 예시")
+        st.markdown("### 기사 A")
+        st.write(f"출처: {top_sim['source_a']} / 날짜: {top_sim['date_a']}")
+        st.write(top_sim["title_a"])
+
+        st.markdown("### 기사 B")
+        st.write(f"출처: {top_sim['source_b']} / 날짜: {top_sim['date_b']}")
+        st.write(top_sim["title_b"])
+
+    section("분석 의미")
+    insight_box("왜 이 분석을 추가했는가?", [
+        "기존에는 동일 제목 또는 동일 링크 중심으로 중복을 제거했지만, 제목이 조금 다르고 내용이 비슷한 기사는 남을 수 있습니다.",
+        "TF-IDF는 기사 제목과 요약문을 벡터로 변환하고, Cosine Similarity는 두 기사 벡터의 방향이 얼마나 비슷한지 계산합니다.",
+        "이를 통해 유사 기사 반복 문제를 한계점으로만 남기지 않고, 대시보드에서 직접 탐지할 수 있도록 보완했습니다."
+    ])
+
+
+
+# =========================================================
+# 8. Evidence
 # =========================================================
 
 with tab_evidence:
