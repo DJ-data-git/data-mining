@@ -29,7 +29,6 @@ h2,h3 {color:#e5e7eb; font-weight:850;}
 [data-testid="stDataFrame"] {border-radius:16px; overflow:hidden; border:1px solid rgba(148,163,184,.18);}
 .stAlert {background:rgba(14,165,233,.12); border:1px solid rgba(56,189,248,.35); border-radius:16px; color:#e0f2fe;}
 .stButton > button {background:linear-gradient(135deg,#0284c7,#2563eb); color:white; border:0; border-radius:999px; padding:.5rem 1rem; font-weight:700;}
-.stTextInput input, .stSelectbox div[data-baseweb="select"] {background:#020617; color:#e5e7eb; border-radius:12px;}
 hr {border:none; height:1px; background:linear-gradient(90deg,transparent,#38bdf8,transparent); margin:2rem 0;}
 section[data-testid="stSidebar"] {background:#020617;}
 .stTabs [data-baseweb="tab-list"] {
@@ -58,7 +57,7 @@ section[data-testid="stSidebar"] {background:#020617;}
 """, unsafe_allow_html=True)
 
 st.title("IT 뉴스 데이터마이닝 분석 대시보드")
-st.caption("AWS Lambda로 수집·전처리한 IT 뉴스 데이터를 S3에서 불러와 TF-IDF, 시계열, 감성, 동시출현, LDA 토픽 모델링으로 분석합니다.")
+st.caption("뉴스 데이터를 단순 나열하지 않고, 분석 질문별로 데이터마이닝 기법을 적용해 발견점과 해석을 도출합니다.")
 
 # =========================================================
 # Config
@@ -105,14 +104,8 @@ TOPIC_MAP = {
     "플랫폼/빅테크": ["네이버", "카카오", "구글", "애플", "메타", "마이크로소프트", "MS", "플랫폼", "빅테크"],
 }
 
-POSITIVE_WORDS = [
-    "성장", "확대", "출시", "투자", "협력", "개선", "강화", "수주", "증가", "성공",
-    "최초", "고도화", "혁신", "개발", "도입", "선정", "공급", "상승", "기대"
-]
-NEGATIVE_WORDS = [
-    "해킹", "침해", "유출", "장애", "중단", "규제", "감소", "적자", "위험", "논란",
-    "피해", "취약점", "공격", "랜섬웨어", "오류", "실패", "제재", "우려", "하락"
-]
+POSITIVE_WORDS = ["성장", "확대", "출시", "투자", "협력", "개선", "강화", "수주", "증가", "성공", "최초", "고도화", "혁신", "개발", "도입", "선정", "공급", "상승", "기대"]
+NEGATIVE_WORDS = ["해킹", "침해", "유출", "장애", "중단", "규제", "감소", "적자", "위험", "논란", "피해", "취약점", "공격", "랜섬웨어", "오류", "실패", "제재", "우려", "하락"]
 RISK_KEYWORDS = ["보안", "해킹", "개인정보", "랜섬웨어", "침해", "취약점", "사이버", "유출", "공격"]
 
 STOPWORDS = [
@@ -150,14 +143,14 @@ def card(title, value, desc="", color="#38bdf8"):
     """, unsafe_allow_html=True)
 
 
-def method_box(method, purpose, calculation, output):
+def analysis_header(question, method, why, output):
     st.markdown(f"""
-    <div style="background:rgba(2,6,23,.74);border:1px solid rgba(148,163,184,.18);
-    border-radius:18px;padding:17px;margin-bottom:12px;">
-      <div style="font-size:18px;font-weight:950;color:#f8fafc;margin-bottom:10px;">분석기법: {method}</div>
-      <div style="color:#cbd5e1;line-height:1.7;"><b>분석 목적</b>: {purpose}</div>
-      <div style="color:#cbd5e1;line-height:1.7;"><b>계산 방식</b>: {calculation}</div>
-      <div style="color:#e0f2fe;line-height:1.7;"><b>도출 결과</b>: {output}</div>
+    <div style="background:rgba(2,6,23,.76);border:1px solid rgba(56,189,248,.28);
+    border-radius:20px;padding:20px;margin-bottom:14px;">
+      <div style="font-size:22px;font-weight:950;color:#f8fafc;margin-bottom:10px;">분석 질문: {question}</div>
+      <div style="color:#dbeafe;line-height:1.75;"><b>사용 기법</b>: {method}</div>
+      <div style="color:#cbd5e1;line-height:1.75;"><b>분석 이유</b>: {why}</div>
+      <div style="color:#e0f2fe;line-height:1.75;"><b>확인할 결과</b>: {output}</div>
     </div>
     """, unsafe_allow_html=True)
 
@@ -190,7 +183,7 @@ def progress_list(df, label_col, value_col, title=None, top_n=10, suffix="건"):
         """, unsafe_allow_html=True)
 
 
-def insight_box(title, bullets):
+def insight_box(title, bullets, color="#38bdf8"):
     body = "".join([f"<li>{b}</li>" for b in bullets])
     st.markdown(f"""
     <div style="background:rgba(14,165,233,.12);border:1px solid rgba(56,189,248,.35);
@@ -199,6 +192,7 @@ def insight_box(title, bullets):
       <ul style="color:#dbeafe;line-height:1.75;margin-bottom:0;">{body}</ul>
     </div>
     """, unsafe_allow_html=True)
+
 
 # =========================================================
 # S3 Loading
@@ -233,6 +227,7 @@ def load_csvs(bucket, keys):
         tmp["loaded_file"] = key
         dfs.append(tmp)
     return pd.concat(dfs, ignore_index=True) if dfs else pd.DataFrame()
+
 
 # =========================================================
 # Data Utilities
@@ -372,7 +367,6 @@ def add_topic(df):
 def classify_sentiment(text):
     pos = sum(w in str(text) for w in POSITIVE_WORDS)
     neg = sum(w in str(text) for w in NEGATIVE_WORDS)
-
     if neg > pos:
         return "부정/리스크"
     if pos > neg:
@@ -393,10 +387,6 @@ def topic_counts(df):
     res.columns = ["topic", "count"]
     res["ratio"] = (res["count"] / len(df) * 100).round(1) if len(df) else 0
     return res
-
-
-def daily_counts(df, date_col):
-    return df.groupby(date_col).size().reset_index(name="article_count").sort_values(date_col)
 
 
 def period_counts(df, period_col, period_label_map):
@@ -504,16 +494,6 @@ def period_keyword_change(current_df, previous_df, keywords):
         axis=1
     )
     return merged.sort_values(["change", "current_count"], ascending=False).reset_index(drop=True)
-
-
-def keyword_timeseries(df, date_col, keywords):
-    rows = []
-    for date in sorted(df[date_col].dropna().unique()):
-        sub = df[df[date_col] == date]
-        counts = keyword_counts(sub, keywords)
-        for _, row in counts.iterrows():
-            rows.append({"date": date, "keyword": row["keyword"], "count": int(row["count"])})
-    return pd.DataFrame(rows)
 
 
 def keyword_network(df, keywords):
@@ -631,6 +611,13 @@ def article_table(df, date_col="analysis_date", n=200):
     view = df.sort_values(date_col, ascending=False).head(n) if date_col in df.columns else df.head(n)
     st.dataframe(view[cols], use_container_width=True)
 
+
+def safe_top(df, col, default="-"):
+    if df is None or df.empty or col not in df.columns:
+        return default
+    return df.iloc[0][col]
+
+
 # =========================================================
 # Load + Compute
 # =========================================================
@@ -646,9 +633,6 @@ df, DATE_COL = prepare_df(df)
 df = add_topic(df)
 df = add_sentiment(df)
 
-latest_date = df[DATE_COL].dropna().max()
-latest_df = df[df[DATE_COL] == latest_date].copy()
-
 # =========================================================
 # Sidebar Global Filter
 # =========================================================
@@ -659,7 +643,7 @@ period_option = st.sidebar.selectbox(
     "분석 단위 선택",
     ["일별", "주별", "월별", "연별"],
     index=0,
-    help="선택한 단위에 따라 Summary와 시계열 분석의 기준 구간이 바뀝니다."
+    help="선택한 단위에 따라 Summary와 분석 결과의 기준 구간이 바뀝니다."
 )
 
 summary_df = add_period_column(df, DATE_COL, period_option)
@@ -687,181 +671,193 @@ st.sidebar.info(
     f"전체 기사 수: {len(df):,}건"
 )
 
-# Current/overall metrics
+# Core metrics
 active_keyword_count = keyword_counts(active_df, CORE_KEYWORDS)
 overall_keyword_count = keyword_counts(df, CORE_KEYWORDS)
 active_tfidf = tfidf_keywords(active_df, top_n=20)
 overall_tfidf = tfidf_keywords(df, top_n=25)
 candidate_tfidf = keyword_candidate_tfidf(active_df, CORE_KEYWORDS, top_n=20)
 active_topics = topic_counts(active_df)
-active_sentiment = active_df["sentiment_group"].value_counts().reset_index()
-active_sentiment.columns = ["sentiment", "count"] if not active_sentiment.empty else ["sentiment", "count"]
 keyword_change_df = period_keyword_change(active_df, previous_df, CORE_KEYWORDS)
 
 network_keywords = candidate_tfidf["keyword"].head(25).tolist() if not candidate_tfidf.empty else overall_keyword_count["keyword"].head(25).tolist()
 net_df = keyword_network(active_df if len(active_df) else df, network_keywords)
+
 lda_docs = text_series(active_df if len(active_df) >= 20 else df).tolist()
+lda_topic_df, lda_doc_topics = lda_topic_modeling(lda_docs, n_topics=5, n_words=8)
+
+# Summary derived findings
+top_frequency_keyword = safe_top(active_keyword_count, "keyword")
+top_frequency_count = int(safe_top(active_keyword_count, "count", 0)) if not active_keyword_count.empty else 0
+
+top_tfidf_keyword = safe_top(candidate_tfidf, "keyword")
+top_tfidf_score = safe_top(candidate_tfidf, "score", 0)
+
+top_change_keyword = safe_top(keyword_change_df, "keyword")
+top_change_value = int(safe_top(keyword_change_df, "change", 0)) if not keyword_change_df.empty else 0
+
+top_topic = safe_top(active_topics, "topic")
+top_topic_ratio = safe_top(active_topics, "ratio", 0)
+
+risk_df = filter_keywords(active_df, RISK_KEYWORDS)
+risk_ratio = round(len(risk_df) / len(active_df) * 100, 1) if len(active_df) else 0
+
+sentiment_df = active_df["sentiment_group"].value_counts().reset_index()
+sentiment_df.columns = ["sentiment", "count"] if not sentiment_df.empty else ["sentiment", "count"]
+top_sentiment = safe_top(sentiment_df, "sentiment")
+
+top_pair = f"{net_df.iloc[0]['keyword_a']} ↔ {net_df.iloc[0]['keyword_b']}" if not net_df.empty else "-"
+top_pair_count = int(net_df.iloc[0]["co_count"]) if not net_df.empty else 0
+
+top_lda_topic = safe_top(lda_topic_df.sort_values("article_count", ascending=False) if not lda_topic_df.empty else lda_topic_df, "topic_id")
+top_lda_words = safe_top(lda_topic_df.sort_values("article_count", ascending=False) if not lda_topic_df.empty else lda_topic_df, "top_words")
 
 # =========================================================
-# Tabs
+# Tabs - Question Driven
 # =========================================================
 
-tab_summary, tab_tfidf, tab_time, tab_sentiment, tab_network, tab_lda, tab_evidence = st.tabs([
-    "1. Executive Summary",
-    "2. TF-IDF Analysis",
-    "3. Time Series Analysis",
-    "4. Sentiment Analysis",
-    "5. Co-occurrence Analysis",
-    "6. LDA Topic Modeling",
-    "7. Evidence Center"
+tab_summary, tab_importance, tab_trend, tab_sentiment, tab_network, tab_lda, tab_evidence = st.tabs([
+    "1. 핵심 발견 요약",
+    "2. 중요한 키워드",
+    "3. 급부상 이슈",
+    "4. 뉴스 성향",
+    "5. 함께 움직이는 기술",
+    "6. 숨겨진 토픽",
+    "7. 근거 기사"
 ])
 
 # =========================================================
-# 1. Executive Summary
+# 1. Summary
 # =========================================================
 
 with tab_summary:
-    st.subheader("Executive Summary")
-    st.caption("선택한 분석 단위의 현재 구간을 기준으로 기사량, 핵심 키워드, 주제, 감성, 관계 분석 결과를 요약합니다.")
+    analysis_header(
+        "현재 IT 뉴스에서 무엇을 발견했는가?",
+        "Descriptive Analytics + TF-IDF + Time Series + Sentiment + Co-occurrence + LDA",
+        "각 분석기법의 결과를 따로 나열하지 않고, 현재 구간에서 도출된 핵심 발견을 한 화면에 요약합니다.",
+        "핵심 키워드, 특징 키워드, 급부상 키워드, 리스크 비중, 연결 관계, 잠재 토픽"
+    )
 
     min_date = df[DATE_COL].min()
     max_date = df[DATE_COL].max()
-    total_periods = summary_df[PERIOD_COL].nunique()
-    active_total = len(active_df)
-
-    top_keyword = active_keyword_count.iloc[0]["keyword"] if not active_keyword_count.empty else "-"
-    top_keyword_count = int(active_keyword_count.iloc[0]["count"]) if not active_keyword_count.empty else 0
-
-    top_topic = active_topics.iloc[0]["topic"] if not active_topics.empty else "-"
-    top_topic_count = int(active_topics.iloc[0]["count"]) if not active_topics.empty else 0
-
-    risk_df = filter_keywords(active_df, RISK_KEYWORDS)
-    risk_ratio = round(len(risk_df) / active_total * 100, 1) if active_total else 0
-
-    top_pair = f"{net_df.iloc[0]['keyword_a']} ↔ {net_df.iloc[0]['keyword_b']}" if not net_df.empty else "-"
-    top_pair_count = int(net_df.iloc[0]["co_count"]) if not net_df.empty else 0
 
     c1, c2, c3, c4 = st.columns(4)
     with c1:
-        card("현재 분석 구간", current_period_label, f"원본 범위 {min_date} ~ {max_date} / {period_option} 기준 {total_periods:,}개 구간")
+        card("현재 분석 구간", current_period_label, f"원본 범위 {min_date} ~ {max_date}")
     with c2:
-        card("현재 구간 기사 수", f"{active_total:,}건", f"전체 수집 기사 {len(df):,}건 중 현재 구간")
+        card("현재 구간 기사 수", f"{len(active_df):,}건", f"전체 수집 기사 {len(df):,}건")
     with c3:
-        card("현재 핵심 키워드", top_keyword, f"{top_keyword_count:,}건 언급")
+        card("최다 언급 키워드", top_frequency_keyword, f"{top_frequency_count:,}건 언급")
     with c4:
-        card("리스크 기사 비중", f"{risk_ratio}%", f"리스크 키워드 기사 {len(risk_df):,}건", "#ef4444")
+        card("리스크 기사 비중", f"{risk_ratio}%", f"리스크 기사 {len(risk_df):,}건", "#ef4444")
 
-    section("적용 분석기법")
-    m1, m2, m3 = st.columns(3)
-    with m1:
-        method_box("TF-IDF Analysis", "단순 빈도보다 해당 기간을 대표하는 중요 키워드 추출", "문서별 TF-IDF 점수 합산", "핵심 키워드와 관련 기사 도출")
-    with m2:
-        method_box("Time Series Analysis", "일/주/월/연 기준 뉴스량과 키워드 변화 확인", "기간별 기사 수 및 직전 구간 대비 변화량 계산", "증가 이슈와 감소 이슈 파악")
-    with m3:
-        method_box("LDA Topic Modeling", "뉴스 집합 내부의 잠재 토픽 탐색", "CountVectorizer + Latent Dirichlet Allocation", "토픽별 대표 단어와 기사 비중 도출")
-
-    section(f"현재 {period_option} 구간 분석 결과")
-    col_a, col_b = st.columns(2)
-    with col_a:
-        progress_list(active_keyword_count.head(10), "keyword", "count", f"{current_period_label} 핵심 키워드 TOP 10")
-    with col_b:
-        progress_list(active_topics.head(10), "topic", "count", f"{current_period_label} 주제 분포")
-
-    section("직전 구간 대비 증가 키워드")
-    progress_list(keyword_change_df.head(10), "keyword", "change", "증가량 TOP 10", suffix="건")
-
-    insight_box("요약 해석", [
-        f"현재 분석 구간은 {current_period_label}이며, 해당 구간의 기사 수는 {active_total:,}건입니다.",
-        f"현재 구간의 최다 키워드는 '{top_keyword}'이며 {top_keyword_count:,}건 등장했습니다.",
-        f"현재 구간의 최다 주제는 '{top_topic}'이며 {top_topic_count:,}건 관련 기사가 확인되었습니다.",
-        f"리스크 키워드가 포함된 기사는 {len(risk_df):,}건이며, 전체 대비 {risk_ratio}%입니다.",
-        f"동시출현 분석 기준 가장 강한 관계는 '{top_pair}'이며 {top_pair_count:,}건 함께 등장했습니다."
+    section("분석을 통해 발견한 핵심 내용")
+    insight_box("핵심 발견", [
+        f"단순 빈도 기준으로는 '{top_frequency_keyword}'가 가장 많이 언급되었습니다.",
+        f"TF-IDF 기준으로는 '{top_tfidf_keyword}'가 현재 구간을 대표하는 특징 키워드로 나타났습니다.",
+        f"직전 구간 대비 가장 크게 증가한 키워드는 '{top_change_keyword}'이며 변화량은 {top_change_value:+,}건입니다.",
+        f"주제 분류 기준 가장 큰 비중은 '{top_topic}'이며 전체의 {top_topic_ratio}%입니다.",
+        f"감성 분석 기준 현재 구간의 대표 성향은 '{top_sentiment}'입니다.",
+        f"동시출현 분석 기준 가장 강한 연결 관계는 '{top_pair}'이며 {top_pair_count:,}건 함께 등장했습니다.",
+        f"LDA 분석에서 가장 큰 잠재 토픽은 '{top_lda_topic}'이며 대표 단어는 '{top_lda_words}'입니다."
     ])
 
-    with st.expander("현재 구간 필터 검증"):
-        st.write("현재 분석 단위:", period_option)
-        st.write("현재 분석 구간:", current_period_label)
-        st.write("active_df 기사 수:", len(active_df))
-        st.dataframe(active_df[[DATE_COL, PERIOD_COL, PERIOD_LABEL_COL, "title"]].head(20), use_container_width=True)
+    section("현재 구간 주요 데이터")
+    col_a, col_b = st.columns(2)
+    with col_a:
+        progress_list(active_keyword_count.head(10), "keyword", "count", "빈도 기준 핵심 키워드 TOP 10")
+    with col_b:
+        progress_list(active_topics.head(10), "topic", "count", "주제 분류 결과")
 
 # =========================================================
-# 2. TF-IDF
+# 2. Keyword Importance
 # =========================================================
 
-with tab_tfidf:
-    st.subheader("TF-IDF Analysis")
-    method_box(
-        "TF-IDF Analysis",
-        "현재 분석 구간에서 단순히 자주 등장한 단어가 아니라, 해당 뉴스 집합을 상대적으로 잘 대표하는 키워드를 추출합니다.",
-        "TfidfVectorizer를 적용하여 각 단어의 중요도를 계산한 뒤 전체 문서 기준으로 점수를 합산합니다.",
-        "TF-IDF 점수가 높은 키워드는 현재 구간의 특징적인 이슈로 해석합니다."
+with tab_importance:
+    analysis_header(
+        "많이 나온 키워드와 실제로 중요한 키워드는 같은가?",
+        "Keyword Frequency Analysis + TF-IDF Analysis",
+        "단순 빈도만 보면 일반적으로 자주 등장하는 단어가 중요해 보일 수 있으므로, TF-IDF로 현재 구간을 더 잘 대표하는 키워드를 따로 확인합니다.",
+        "빈도 TOP 키워드와 TF-IDF TOP 키워드를 비교하여 '많이 언급된 이슈'와 '특징적인 이슈'를 구분합니다."
     )
 
+    freq_top = active_keyword_count.head(10).copy()
+    tfidf_top = candidate_tfidf.head(10).copy()
+
+    f1, f2, f3 = st.columns(3)
+    with f1:
+        card("빈도 1위", top_frequency_keyword, f"{top_frequency_count:,}건 등장")
+    with f2:
+        card("TF-IDF 1위", top_tfidf_keyword, f"점수 {top_tfidf_score}")
+    with f3:
+        same_or_diff = "같음" if top_frequency_keyword == top_tfidf_keyword else "다름"
+        card("빈도 vs TF-IDF", same_or_diff, "두 결과가 다르면 특징 키워드가 따로 존재한다는 의미")
+
+    section("빈도 분석과 TF-IDF 분석 비교")
     col1, col2 = st.columns(2)
     with col1:
-        st.markdown("### 전체 단어 기반 TF-IDF")
-        st.dataframe(active_tfidf, use_container_width=True)
+        progress_list(freq_top, "keyword", "count", "단순 빈도 TOP 10")
+        st.dataframe(freq_top, use_container_width=True)
     with col2:
-        st.markdown("### IT 후보 키워드 기반 TF-IDF")
-        st.dataframe(candidate_tfidf, use_container_width=True)
+        progress_list(tfidf_top, "keyword", "score", "TF-IDF 중요도 TOP 10", suffix="점")
+        st.dataframe(tfidf_top, use_container_width=True)
+
+    common = set(freq_top["keyword"]).intersection(set(tfidf_top["keyword"])) if not freq_top.empty and not tfidf_top.empty else set()
+    only_tfidf = [kw for kw in tfidf_top["keyword"].tolist() if kw not in freq_top["keyword"].tolist()] if not tfidf_top.empty and not freq_top.empty else []
+
+    insight_box("분석 해석", [
+        f"빈도 1위는 '{top_frequency_keyword}', TF-IDF 1위는 '{top_tfidf_keyword}'입니다.",
+        f"빈도 TOP 10과 TF-IDF TOP 10의 공통 키워드는 {len(common)}개입니다.",
+        f"TF-IDF에만 강하게 나타난 키워드는 {', '.join(only_tfidf[:5]) if only_tfidf else '없음'}입니다.",
+        "따라서 이 화면에서는 단순히 많이 나온 키워드가 아니라, 현재 뉴스 구간을 특징짓는 키워드를 확인할 수 있습니다."
+    ])
 
     if not candidate_tfidf.empty:
-        selected_kw = st.selectbox("키워드 심층 분석", candidate_tfidf["keyword"].tolist())
+        selected_kw = st.selectbox("TF-IDF 키워드 근거 기사 확인", candidate_tfidf["keyword"].tolist())
         selected_df = filter_keyword(active_df, selected_kw)
-        selected_all_df = filter_keyword(df, selected_kw)
-
-        k1, k2, k3 = st.columns(3)
-        with k1:
-            card("현재 구간 관련 기사", f"{len(selected_df):,}건", current_period_label)
-        with k2:
-            card("전체 기간 관련 기사", f"{len(selected_all_df):,}건", "전체 수집 범위")
-        with k3:
-            score = candidate_tfidf[candidate_tfidf["keyword"] == selected_kw]["score"].iloc[0]
-            card("TF-IDF 점수", f"{score}", "후보 키워드 기준")
-
-        section(f"'{selected_kw}' 관련 기사")
+        st.info(f"'{selected_kw}' 관련 기사: {len(selected_df):,}건")
         article_table(selected_df, DATE_COL, n=100)
 
-        section(f"'{selected_kw}' 유사 기사")
-        st.dataframe(similar_articles(active_df, selected_kw, top_n=10), use_container_width=True)
-
 # =========================================================
-# 3. Time Series
+# 3. Trend
 # =========================================================
 
-with tab_time:
-    st.subheader("Time Series Analysis")
-    method_box(
-        "Time Series Analysis",
-        "뉴스 기사량과 키워드가 시간에 따라 어떻게 변화하는지 확인합니다.",
-        "일별/주별/월별/연별로 데이터를 재집계하고, 현재 구간과 직전 구간의 키워드 빈도를 비교합니다.",
-        "기간별 기사량 변화와 급상승 키워드를 통해 단기 이슈 변화를 파악합니다."
+with tab_trend:
+    analysis_header(
+        "최근 어떤 이슈가 급부상했는가?",
+        "Time Series Analysis + Period-over-Period Change Analysis",
+        "일/주/월/년 단위로 데이터를 재집계하고 직전 구간과 비교해 증가한 키워드를 탐지합니다.",
+        "현재 구간에서 새롭게 증가한 키워드와 기사량이 집중된 구간을 확인합니다."
     )
 
     period_count_df = period_counts(summary_df, PERIOD_COL, period_label_map)
+    peak_period = period_count_df.sort_values("article_count", ascending=False).iloc[0]["period_label"] if not period_count_df.empty else "-"
+    peak_count = int(period_count_df.sort_values("article_count", ascending=False).iloc[0]["article_count"]) if not period_count_df.empty else 0
 
-    c1, c2 = st.columns([1, 1])
+    c1, c2, c3 = st.columns(3)
     with c1:
-        progress_list(period_count_df.sort_values("article_count", ascending=False), "period_label", "article_count", f"{period_option} 기사량 TOP 10")
+        card("현재 분석 구간", current_period_label, period_option)
     with c2:
+        card("기사량 최다 구간", peak_period, f"{peak_count:,}건")
+    with c3:
+        card("최대 증가 키워드", top_change_keyword, f"{top_change_value:+,}건")
+
+    section("기간별 기사량")
+    col1, col2 = st.columns(2)
+    with col1:
+        progress_list(period_count_df.sort_values("article_count", ascending=False), "period_label", "article_count", f"{period_option} 기사량 TOP 10")
+    with col2:
         st.dataframe(period_count_df, use_container_width=True)
 
-    section("직전 구간 대비 키워드 변화")
+    section("직전 구간 대비 증가 키워드")
     st.dataframe(keyword_change_df, use_container_width=True)
     progress_list(keyword_change_df.head(10), "keyword", "change", "증가 키워드 TOP 10", suffix="건")
 
-    section("일별 키워드 변화")
-    kw_for_ts = st.selectbox("시계열 확인 키워드", overall_keyword_count["keyword"].head(30).tolist() if not overall_keyword_count.empty else CORE_KEYWORDS)
-    ts_df = keyword_timeseries(df, DATE_COL, [kw_for_ts])
-    if ts_df.empty:
-        st.warning("선택 키워드의 시계열 데이터가 없습니다.")
-    else:
-        st.dataframe(ts_df, use_container_width=True)
-
-    insight_box("해석", [
-        f"현재 대시보드는 '{period_option}' 기준으로 데이터를 재집계합니다.",
-        "기간별 기사량은 특정 시점에 뉴스가 집중되는 구간을 확인하는 데 사용합니다.",
-        "직전 구간 대비 증가량이 큰 키워드는 단기적으로 관심이 증가한 이슈로 해석할 수 있습니다."
+    insight_box("분석 해석", [
+        f"현재 분석 단위는 '{period_option}'이며 현재 구간은 '{current_period_label}'입니다.",
+        f"기사량이 가장 많았던 구간은 '{peak_period}'이며 {peak_count:,}건이 수집되었습니다.",
+        f"직전 구간 대비 가장 크게 증가한 키워드는 '{top_change_keyword}'입니다.",
+        "이 결과는 특정 이슈가 단기적으로 부상했는지 확인하는 데 사용됩니다."
     ])
 
 # =========================================================
@@ -869,25 +865,38 @@ with tab_time:
 # =========================================================
 
 with tab_sentiment:
-    st.subheader("Sentiment Analysis")
-    method_box(
-        "Rule-based Sentiment Analysis",
-        "뉴스 제목과 요약문에 포함된 긍정/부정 키워드를 기준으로 기사 성향을 분류합니다.",
-        "긍정 키워드 수와 부정/리스크 키워드 수를 비교하여 긍정/성장, 중립, 부정/리스크로 분류합니다.",
-        "IT 뉴스 내 성장 이슈와 위험 신호의 비중을 비교합니다."
+    analysis_header(
+        "IT 뉴스는 성장 이슈 중심인가, 리스크 이슈 중심인가?",
+        "Rule-based Sentiment Analysis + Risk Keyword Analysis",
+        "뉴스 제목과 요약문에서 긍정/성장 키워드와 부정/리스크 키워드를 비교해 기사 성향을 분류합니다.",
+        "긍정/중립/부정 비중과 리스크가 높은 주제를 확인합니다."
     )
 
-    sentiment_df = active_df["sentiment_group"].value_counts().reset_index()
-    sentiment_df.columns = ["sentiment", "count"]
-    sentiment_df["ratio"] = (sentiment_df["count"] / len(active_df) * 100).round(1) if len(active_df) else 0
+    sentiment_count = active_df["sentiment_group"].value_counts().reset_index()
+    sentiment_count.columns = ["sentiment", "count"] if not sentiment_count.empty else ["sentiment", "count"]
+    if not sentiment_count.empty:
+        sentiment_count["ratio"] = (sentiment_count["count"] / len(active_df) * 100).round(1)
 
-    c1, c2 = st.columns(2)
+    neg_count = int(sentiment_count[sentiment_count["sentiment"] == "부정/리스크"]["count"].sum()) if not sentiment_count.empty else 0
+    pos_count = int(sentiment_count[sentiment_count["sentiment"] == "긍정/성장"]["count"].sum()) if not sentiment_count.empty else 0
+    neg_ratio = round(neg_count / len(active_df) * 100, 1) if len(active_df) else 0
+
+    c1, c2, c3 = st.columns(3)
     with c1:
-        st.dataframe(sentiment_df, use_container_width=True)
+        card("대표 성향", top_sentiment, "현재 구간 기준")
     with c2:
-        progress_list(sentiment_df, "sentiment", "count", "현재 구간 감성 분포")
+        card("긍정/성장 기사", f"{pos_count:,}건", "투자·출시·성장 등")
+    with c3:
+        card("부정/리스크 기사", f"{neg_count:,}건", f"전체 대비 {neg_ratio}%", "#ef4444")
 
-    section("주제별 감성 분포")
+    section("감성 분포")
+    col1, col2 = st.columns(2)
+    with col1:
+        progress_list(sentiment_count, "sentiment", "count", "현재 구간 감성 분포")
+    with col2:
+        st.dataframe(sentiment_count, use_container_width=True)
+
+    section("주제별 리스크 비율")
     if len(active_df):
         topic_sentiment = active_df.pivot_table(
             index="primary_topic",
@@ -901,33 +910,41 @@ with tab_sentiment:
         if "부정/리스크" not in topic_sentiment.columns:
             topic_sentiment["부정/리스크"] = 0
         topic_sentiment["risk_ratio"] = (topic_sentiment["부정/리스크"] / topic_sentiment["total"] * 100).round(1).fillna(0)
-        st.dataframe(topic_sentiment.sort_values("risk_ratio", ascending=False), use_container_width=True)
+        topic_sentiment = topic_sentiment.sort_values("risk_ratio", ascending=False)
+        st.dataframe(topic_sentiment, use_container_width=True)
+        top_risk_topic = topic_sentiment.iloc[0]["primary_topic"] if not topic_sentiment.empty else "-"
+        top_risk_ratio = topic_sentiment.iloc[0]["risk_ratio"] if not topic_sentiment.empty else 0
     else:
+        top_risk_topic = "-"
+        top_risk_ratio = 0
         st.warning("현재 구간 데이터가 없습니다.")
 
-    section("리스크 기사 근거")
-    article_table(active_df[active_df["sentiment_group"] == "부정/리스크"], DATE_COL, n=100)
+    insight_box("분석 해석", [
+        f"현재 구간의 대표 감성은 '{top_sentiment}'입니다.",
+        f"부정/리스크 기사는 {neg_count:,}건이며 전체 대비 {neg_ratio}%입니다.",
+        f"리스크 비율이 가장 높은 주제는 '{top_risk_topic}'이며 리스크 비율은 {top_risk_ratio}%입니다.",
+        "이를 통해 단순 기술 성장 뉴스뿐 아니라 보안·개인정보·장애 등 위험 신호도 함께 확인할 수 있습니다."
+    ])
 
 # =========================================================
 # 5. Co-occurrence
 # =========================================================
 
 with tab_network:
-    st.subheader("Co-occurrence Analysis")
-    method_box(
-        "Co-occurrence Analysis",
-        "같은 기사 안에 함께 등장한 키워드 쌍을 계산하여 IT 이슈 간 관계를 분석합니다.",
-        "기사별 등장 키워드를 추출한 뒤 가능한 키워드 조합의 동시출현 빈도를 계산합니다.",
-        "동시출현 빈도가 높은 키워드 쌍은 같은 맥락에서 자주 보도되는 연결 이슈로 해석합니다."
+    analysis_header(
+        "어떤 기술 이슈들이 함께 움직이는가?",
+        "Co-occurrence Analysis + Network Analysis",
+        "같은 기사 안에 함께 등장한 키워드 쌍을 계산해 이슈 간 관계를 확인합니다.",
+        "강한 연결 관계를 통해 AI-반도체, 클라우드-데이터센터 같은 연결 구조를 파악합니다."
     )
 
     if net_df.empty:
         st.warning("현재 구간에서 동시출현 네트워크를 만들 수 있는 데이터가 부족합니다.")
     else:
-        top_pair = net_df.iloc[0]
+        top_pair_row = net_df.iloc[0]
         c1, c2, c3 = st.columns(3)
         with c1:
-            card("최강 연결", f"{top_pair['keyword_a']} ↔ {top_pair['keyword_b']}", f"{int(top_pair['co_count']):,}건 동시출현")
+            card("최강 연결", f"{top_pair_row['keyword_a']} ↔ {top_pair_row['keyword_b']}", f"{int(top_pair_row['co_count']):,}건 동시출현")
         with c2:
             card("관계 수", f"{len(net_df):,}개", "키워드 페어 기준")
         with c3:
@@ -937,10 +954,11 @@ with tab_network:
         components.html(network_html(net_df), height=720, scrolling=True)
         st.dataframe(net_df.head(50), use_container_width=True)
 
-        insight_box("해석", [
-            f"가장 강한 연결은 '{top_pair['keyword_a']} ↔ {top_pair['keyword_b']}'입니다.",
-            "이는 두 키워드가 같은 기사 안에서 자주 함께 등장했다는 의미입니다.",
-            "개별 키워드 빈도만으로는 확인하기 어려운 이슈 간 관계 구조를 확인할 수 있습니다."
+        insight_box("분석 해석", [
+            f"가장 강한 연결은 '{top_pair}'입니다.",
+            f"해당 키워드 조합은 {top_pair_count:,}건의 기사에서 함께 등장했습니다.",
+            "이는 두 이슈가 같은 맥락에서 자주 보도되었다는 의미입니다.",
+            "개별 키워드 빈도만으로는 확인하기 어려운 이슈 간 연결 구조를 확인할 수 있습니다."
         ])
 
 # =========================================================
@@ -948,17 +966,16 @@ with tab_network:
 # =========================================================
 
 with tab_lda:
-    st.subheader("LDA Topic Modeling")
-    method_box(
+    analysis_header(
+        "뉴스 속 숨겨진 주제는 무엇인가?",
         "LDA Topic Modeling",
-        "뉴스 데이터 내부에 숨어 있는 잠재 토픽을 비지도 학습 방식으로 탐색합니다.",
-        "CountVectorizer로 문서-단어 행렬을 만들고 Latent Dirichlet Allocation을 적용합니다.",
-        "각 토픽의 대표 단어와 토픽별 기사 비중을 확인합니다."
+        "사전에 정한 분류표가 아니라, 뉴스 데이터 내부에서 함께 등장하는 단어 패턴을 바탕으로 잠재 토픽을 탐색합니다.",
+        "각 토픽의 대표 단어와 기사 비중을 통해 숨겨진 뉴스 주제를 해석합니다."
     )
 
     st.info(
         "LDA는 데이터 수와 기간이 충분할수록 안정적인 결과를 냅니다. "
-        "현재 결과는 잠재 토픽 탐색용이며, 향후 수개월 이상의 데이터가 누적되면 더 신뢰도 높은 토픽 분석이 가능합니다."
+        "현재 결과는 잠재 토픽 탐색 결과로 제시하고, 향후 데이터가 누적되면 더 신뢰도 높은 토픽 분석으로 확장할 수 있습니다."
     )
 
     lda_topic_count = st.slider("LDA 토픽 수", min_value=3, max_value=8, value=5)
@@ -974,17 +991,28 @@ with tab_lda:
     if lda_topic_df.empty:
         st.warning("LDA 분석을 수행하기에 문서 수 또는 단어 수가 부족합니다.")
     else:
-        c1, c2 = st.columns([1.2, 1])
-        with c1:
-            st.dataframe(lda_topic_df, use_container_width=True)
-        with c2:
-            progress_list(lda_topic_df.sort_values("article_count", ascending=False), "topic_id", "article_count", "LDA 토픽별 기사 수", top_n=lda_topic_count)
+        lda_topic_df = lda_topic_df.sort_values("article_count", ascending=False).reset_index(drop=True)
+        top_lda = lda_topic_df.iloc[0]
 
-        insight_box("LDA 해석 기준", [
-            "각 Topic의 대표 단어를 보고 사람이 토픽명을 해석해야 합니다.",
-            "예: 'AI, GPT, OpenAI, GPU'가 함께 나타나면 AI/인공지능 토픽으로 해석할 수 있습니다.",
-            "현재 수집 기간이 짧기 때문에 LDA 결과는 확정적인 결론보다 탐색적 분석 결과로 제시하는 것이 적절합니다.",
-            "향후 데이터 기간을 확대하면 토픽 안정성과 장기 트렌드 분석을 함께 검증할 수 있습니다."
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            card("최대 토픽", top_lda["topic_id"], f"{int(top_lda['article_count']):,}건")
+        with c2:
+            card("대표 단어", top_lda["top_words"].split(",")[0], top_lda["top_words"])
+        with c3:
+            card("토픽 비중", f"{top_lda['ratio']}%", "LDA 기준")
+
+        col1, col2 = st.columns([1.2, 1])
+        with col1:
+            st.dataframe(lda_topic_df, use_container_width=True)
+        with col2:
+            progress_list(lda_topic_df, "topic_id", "article_count", "LDA 토픽별 기사 수", top_n=lda_topic_count)
+
+        insight_box("분석 해석", [
+            f"가장 큰 잠재 토픽은 '{top_lda['topic_id']}'이며 전체의 {top_lda['ratio']}%를 차지합니다.",
+            f"해당 토픽의 대표 단어는 '{top_lda['top_words']}'입니다.",
+            "대표 단어 조합을 바탕으로 사람이 토픽명을 해석해야 합니다.",
+            "현재 데이터 기간이 짧기 때문에 LDA 결과는 확정적 결론보다 탐색적 분석 결과로 제시하는 것이 적절합니다."
         ])
 
 # =========================================================
@@ -992,8 +1020,12 @@ with tab_lda:
 # =========================================================
 
 with tab_evidence:
-    st.subheader("Evidence Center")
-    st.caption("분석 결과의 근거가 되는 실제 기사 데이터를 확인하는 탭입니다.")
+    analysis_header(
+        "분석 결과의 근거 기사는 무엇인가?",
+        "Evidence-based Validation",
+        "분석 결과가 단순 수치에 그치지 않도록 실제 기사 제목, 요약, 링크를 확인합니다.",
+        "키워드, 주제, 감성, 소스별로 분석 근거 기사를 검증합니다."
+    )
 
     col1, col2, col3, col4 = st.columns(4)
     with col1:
