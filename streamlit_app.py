@@ -724,7 +724,7 @@ period_option = st.sidebar.selectbox(
     "분석 단위 선택",
     ["일별", "주별", "월별", "연별"],
     index=0,
-    help="선택한 단위에 따라 핵심 요약과 분석 결과의 기준 구간이 바뀝니다."
+    help="선택한 단위에 따라 IT 뉴스 브리핑과 분석 결과의 기준 기간이 바뀝니다."
 )
 
 summary_df = add_period_column(df, DATE_COL, period_option)
@@ -747,7 +747,7 @@ active_df = summary_df[summary_df[PERIOD_COL] == current_period].copy() if curre
 previous_df = summary_df[summary_df[PERIOD_COL] == previous_period].copy() if previous_period else summary_df.head(0).copy()
 
 st.sidebar.info(
-    f"현재 분석 구간: {current_period_label}\n\n"
+    f"현재 브리핑 기간: {current_period_label}\n\n"
     f"현재 구간 기사 수: {len(active_df):,}건\n\n"
     f"전체 기사 수: {len(df):,}건"
 )
@@ -815,7 +815,7 @@ top_lda_words = safe_top(lda_topic_df, "top_words")
 # =========================================================
 
 tab_summary, tab_importance, tab_trend, tab_risk, tab_network, tab_lda, tab_similarity, tab_evidence = st.tabs([
-    "1. 분석 단위별 핵심 요약",
+    "1. IT 뉴스 브리핑",
     "2. 많이 언급된 키워드 vs 특징 키워드",
     "3. 급부상 이슈 분석",
     "4. 주제별 리스크 분석",
@@ -826,15 +826,15 @@ tab_summary, tab_importance, tab_trend, tab_risk, tab_network, tab_lda, tab_simi
 ])
 
 # =========================================================
-# 1. Summary
+# 1. IT News Briefing
 # =========================================================
 
 with tab_summary:
     analysis_header(
-        "선택한 분석 단위에서 핵심적으로 무엇이 발견되었는가?",
-        "Descriptive Analytics + TF-IDF + Time Series + Sentiment/Risk + Co-occurrence + LDA + Cosine Similarity",
-        "일/주/월/연 분석 단위가 바뀌면 현재 구간 데이터도 바뀌므로, 해당 구간에서 발견된 핵심 이슈를 자동 요약해야 합니다.",
-        "현재 구간의 최다 키워드, 특징 키워드, 급부상 키워드, 리스크 신호, 연결 관계, 잠재 토픽, 유사 기사 반복 여부"
+        "선택한 기간 동안 IT 뉴스에서 어떤 이슈가 있었는가?",
+        "IT News Briefing + Descriptive Analytics + TF-IDF + Time Series + Co-occurrence + LDA + Cosine Similarity",
+        "일/주/월/연 기준으로 선택한 기간의 뉴스를 요약하여, 해당 기간에 주목할 만한 IT 이슈를 한눈에 확인합니다.",
+        "기사 수, 최다 언급 키워드, 특징 키워드, 급부상 키워드, 리스크 신호, 기술 관계, 잠재 토픽, 유사 기사 반복 여부"
     )
 
     min_date = df[DATE_COL].min()
@@ -842,9 +842,9 @@ with tab_summary:
 
     c1, c2, c3, c4 = st.columns(4)
     with c1:
-        card("현재 분석 구간", current_period_label, f"{period_option} 기준 / 원본 {min_date} ~ {max_date}")
+        card("브리핑 기간", current_period_label, f"{period_option} 기준 / 원본 {min_date} ~ {max_date}")
     with c2:
-        card("현재 구간 기사 수", f"{len(active_df):,}건", f"전체 수집 기사 {len(df):,}건")
+        card("브리핑 기사 수", f"{len(active_df):,}건", f"전체 수집 기사 {len(df):,}건")
     with c3:
         card("최다 언급 키워드", top_frequency_keyword, f"{top_frequency_count:,}건")
     with c4:
@@ -858,18 +858,18 @@ with tab_summary:
     with s3:
         card("최대 유사도", f"{max_similarity}", "가장 유사한 기사쌍의 cosine similarity")
 
-    section("현재 구간 핵심 발견 TOP 7")
-    insight_box("핵심 발견", [
-        f"최다 언급 이슈는 '{top_frequency_keyword}'입니다. 현재 구간에서 {top_frequency_count:,}건 등장했습니다.",
-        f"TF-IDF 기준 특징 키워드는 '{top_tfidf_keyword}'입니다. 단순 빈도와 별도로 현재 뉴스 구간을 특징짓는 단어입니다.",
-        f"직전 구간 대비 가장 크게 증가한 키워드는 '{top_change_keyword}'이며 변화량은 {top_change_value:+,}건입니다.",
-        f"주제 분류 기준 가장 큰 비중은 '{top_topic}'이며 전체의 {top_topic_ratio}%입니다.",
-        f"동시출현 분석 기준 가장 강한 연결 관계는 '{top_pair}'이며 {top_pair_count:,}건 함께 등장했습니다.",
-        f"LDA 탐색 결과 주요 잠재 토픽은 '{top_lda_topic}'으로 추정되며 대표 단어는 '{top_lda_words}'입니다.",
-        f"유사 기사 분석 결과 현재 구간에서 유사 기사쌍은 {similar_pair_count:,}쌍이며, 유사 기사 후보에 포함된 기사 비율은 {similar_involved_ratio}%입니다."
+    section("IT 뉴스 브리핑 핵심 요약")
+    insight_box("브리핑 요약", [
+        f"브리핑 기간 동안 최다 언급 이슈는 '{top_frequency_keyword}'입니다. 현재 구간에서 {top_frequency_count:,}건 등장했습니다.",
+        f"TF-IDF 기준으로 이 기간을 특징짓는 키워드는 '{top_tfidf_keyword}'입니다. 단순 빈도와 별도로 현재 뉴스 구간을 특징짓는 단어입니다.",
+        f"직전 기간 대비 가장 크게 증가한 키워드는 '{top_change_keyword}'이며 변화량은 {top_change_value:+,}건입니다.",
+        f"주제 분류 기준으로 가장 큰 비중을 차지한 분야는 '{top_topic}'이며 전체의 {top_topic_ratio}%입니다.",
+        f"기술 관계 분석 기준 가장 강한 연결 관계는 '{top_pair}'이며 {top_pair_count:,}건 함께 등장했습니다.",
+        f"LDA 토픽 탐색 결과 주요 잠재 주제는 '{top_lda_topic}'으로 추정되며 대표 단어는 '{top_lda_words}'입니다.",
+        f"유사 기사 분석 결과 브리핑 기간 내 유사 기사쌍은 {similar_pair_count:,}쌍이며, 유사 기사 후보에 포함된 기사 비율은 {similar_involved_ratio}%입니다."
     ])
 
-    section("요약 근거 데이터")
+    section("브리핑 근거 데이터")
     col_a, col_b = st.columns(2)
     with col_a:
         progress_list(active_keyword_count.head(10), "keyword", "count", "빈도 기준 핵심 키워드")
@@ -969,7 +969,7 @@ with tab_trend:
 
     insight_box("분석 해석", [
         f"현재 분석 단위는 '{period_option}'이며 현재 구간은 '{current_period_label}'입니다.",
-        f"직전 구간 대비 가장 크게 증가한 키워드는 '{top_change_keyword}'입니다.",
+        f"직전 기간 대비 가장 크게 증가한 키워드는 '{top_change_keyword}'입니다.",
         f"새롭게 등장한 키워드는 {len(new_keyword_df):,}개입니다.",
         "증가 키워드는 단기적으로 관심이 상승한 이슈이며, 감소 키워드는 이전 구간 대비 관심이 줄어든 이슈로 해석할 수 있습니다."
     ])
