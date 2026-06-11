@@ -516,64 +516,56 @@ def format_change_rate(previous_count, current_count):
 
 def tfidf_keywords(df, top_n=25):
     """
-    TF-IDF 특징 기술 키워드 추출.
-    title + description만 사용하고, 언론사명/도메인명/URL을 제거한다.
+    IT 기술 후보 키워드 기반 TF-IDF 분석.
+    자유 단어 추출 방식은 '기반', '기업', '공개' 같은 일반 단어가 상위에 올라올 수 있으므로,
+    Time Series 분석과 동일하게 CORE_KEYWORDS 목록을 기준으로 현재 기간을 특징짓는 기술 키워드를 계산한다.
+
+    계산 방식:
+    - TF: 현재 기간 기사에서 해당 키워드가 등장한 기사 수
+    - DF: 전체 분석 데이터에서 해당 키워드가 등장한 기사 수
+    - IDF: 전체 문서 대비 해당 키워드의 희소성
+    - TF-IDF Score = TF * IDF
     """
-    docs = text_series(df).map(clean_for_vectorize).tolist()
-    docs = [d for d in docs if d.strip()]
-
-    if len(docs) < 2:
+    if df.empty:
         return pd.DataFrame(columns=["keyword", "tfidf_score", "doc_count"])
 
-    vectorizer = TfidfVectorizer(
-        max_features=2000,
-        lowercase=False,
-        token_pattern=r"(?u)\b[가-힣A-Za-z0-9+#.-]{2,}\b",
-        min_df=2
-    )
+    current_text = text_series(df).fillna("").astype(str)
 
-    try:
-        mat = vectorizer.fit_transform(docs)
-    except ValueError:
-        return pd.DataFrame(columns=["keyword", "tfidf_score", "doc_count"])
+    # 전체 기간 기준 IDF 계산. summary_df가 아직 없으면 현재 df 기준으로 계산
+    base_df = globals().get("summary_df", df)
+    base_text = text_series(base_df).fillna("").astype(str)
 
-    scores = mat.sum(axis=0).A1
-    terms = vectorizer.get_feature_names_out()
-    doc_counts = (mat > 0).sum(axis=0).A1
-
-    media_stop = {s.lower() for s in MEDIA_DOMAIN_STOPWORDS}
-    stop = {s.lower() for s in STOPWORDS}
-    tech_hints_lower = [k.lower() for k in TECH_KEYWORD_HINTS]
-
+    total_docs = len(base_text)
     rows = []
-    for term, score, doc_count in zip(terms, scores, doc_counts):
-        keyword = normalize_token(term)
-        lower = keyword.lower()
 
-        if lower in stop or lower in media_stop:
-            continue
-        if is_noise_token(keyword):
-            continue
+    seen = set()
+    candidate_keywords = []
+    for kw in CORE_KEYWORDS:
+        normalized_kw = normalize_token(kw) if "normalize_token" in globals() else str(kw)
+        key = normalized_kw.lower()
+        if key not in seen:
+            seen.add(key)
+            candidate_keywords.append(normalized_kw)
 
-        # 도메인성/매체성 단어 재차 제거
-        if any(m in lower for m in media_stop if "." in m):
-            continue
-
-        # 일반 영문 소문자 단어는 기술 힌트가 아니면 제거
-        if re.fullmatch(r"[a-z]{2,}", keyword) and lower not in tech_hints_lower:
+    for kw in candidate_keywords:
+        # 매체명/도메인성 단어 제외
+        if "is_noise_token" in globals() and is_noise_token(kw):
             continue
 
-        is_tech_related = any(h in lower for h in tech_hints_lower)
-        is_korean_term = bool(re.search(r"[가-힣]{2,}", keyword))
-        is_upper_abbrev = bool(re.fullmatch(r"[A-Z0-9+#.-]{2,}", keyword))
-
-        if not (is_tech_related or is_korean_term or is_upper_abbrev):
+        current_count = int(current_text.str.contains(str(kw), case=False, regex=False).sum())
+        if current_count == 0:
             continue
+
+        doc_count = int(base_text.str.contains(str(kw), case=False, regex=False).sum())
+
+        # smoothing 적용
+        idf = math.log((1 + total_docs) / (1 + doc_count)) + 1
+        score = current_count * idf
 
         rows.append({
-            "keyword": keyword,
+            "keyword": kw,
             "tfidf_score": round(float(score), 4),
-            "doc_count": int(doc_count)
+            "doc_count": current_count
         })
 
     if not rows:
@@ -581,15 +573,12 @@ def tfidf_keywords(df, top_n=25):
 
     result = (
         pd.DataFrame(rows)
-        .groupby("keyword", as_index=False)
-        .agg({"tfidf_score": "sum", "doc_count": "sum"})
-        .sort_values("tfidf_score", ascending=False)
+        .sort_values(["tfidf_score", "doc_count"], ascending=False)
         .head(top_n)
         .reset_index(drop=True)
     )
 
     return result
-
 
 def period_keyword_change(current_df, previous_df, keywords):
     cur = keyword_counts(current_df, keywords).rename(columns={"count": "current_count"})
@@ -1030,7 +1019,7 @@ with tab_importance:
     analysis_header(
         "많이 나온 키워드와 현재 뉴스를 특징짓는 키워드는 다른가?",
         "Keyword Frequency Analysis + TF-IDF Analysis",
-        "단순 빈도는 사전에 정한 IT 키워드가 얼마나 많이 등장했는지 보여주고, TF-IDF는 제목+요약문 전체에서 출처·도메인명을 제거한 뒤 현재 구간을 특징짓는 기술 키워드를 자동 추출합니다.",
+        "단순 빈도는 사전에 정한 IT 키워드가 얼마나 많이 등장했는지 보여주고, TF-IDF는 제목+요약문에서 IT 기술 키워드가 등장한 기사 수와 전체 기간 대비 희소성을 반영한 기술 키워드를 자동 추출합니다.",
         "빈도 TOP 키워드와 TF-IDF TOP 단어를 비교해 많이 언급된 이슈와 특징적인 이슈를 구분합니다."
     )
 
@@ -1046,13 +1035,13 @@ with tab_importance:
         same_or_diff = "같음" if top_frequency_keyword == top_tfidf_keyword else "다름"
         card("두 결과 비교", same_or_diff, "다르면 특징 키워드가 별도로 존재한다는 의미")
 
-    section("단순 빈도 TOP 10 vs TF-IDF 특징 기술 키워드 TOP 10")
+    section("단순 빈도 TOP 10 vs TF-IDF 기반 기술 키워드 TOP 10")
     col1, col2 = st.columns(2)
     with col1:
         progress_list(freq_top, "keyword", "count", "단순 빈도 TOP 10")
         st.dataframe(freq_top, use_container_width=True)
     with col2:
-        progress_list(tfidf_top, "keyword", "tfidf_score", "TF-IDF 특징 기술 키워드 TOP 10", suffix="점")
+        progress_list(tfidf_top, "keyword", "tfidf_score", "TF-IDF 기반 기술 키워드 TOP 10", suffix="점")
         st.dataframe(tfidf_top, use_container_width=True)
 
     freq_set = set(freq_top["keyword"].astype(str).tolist()) if not freq_top.empty else set()
@@ -1063,12 +1052,12 @@ with tab_importance:
     insight_box("분석 해석", [
         f"빈도 1위는 '{top_frequency_keyword}', TF-IDF 1위는 '{top_tfidf_keyword}'입니다.",
         f"빈도 TOP 10과 TF-IDF TOP 10의 공통 키워드는 {len(common)}개입니다.",
-        f"TF-IDF에만 강하게 나타난 특징 기술 키워드는 {', '.join(only_tfidf[:5]) if only_tfidf else '없음'}입니다.",
+        f"TF-IDF에서 중요도가 높게 나타난 기술 키워드는 {', '.join(only_tfidf[:5]) if only_tfidf else '없음'}입니다.",
         "이 결과를 통해 단순히 많이 언급된 키워드와 현재 기사 묶음을 특징짓는 단어를 구분할 수 있습니다."
     ])
 
     if not tfidf_top.empty:
-        selected_kw = st.selectbox("TF-IDF 특징 기술 키워드 근거 기사 확인", tfidf_top["keyword"].tolist())
+        selected_kw = st.selectbox("TF-IDF 기반 기술 키워드 근거 기사 확인", tfidf_top["keyword"].tolist())
         selected_df = filter_keyword(active_df, selected_kw)
         st.info(f"'{selected_kw}' 관련 기사: {len(selected_df):,}건")
         article_table(selected_df, DATE_COL, n=100)
