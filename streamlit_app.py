@@ -496,6 +496,20 @@ def safe_top(df, col, default="-"):
         return default
     return df.iloc[0][col]
 
+def format_change_rate(previous_count, current_count):
+    previous_count = int(previous_count)
+    current_count = int(current_count)
+    diff = current_count - previous_count
+
+    if previous_count == 0:
+        if current_count > 0:
+            return "신규 등장"
+        return "변화 없음"
+
+    rate = round(diff / previous_count * 100, 1)
+    sign = "+" if rate > 0 else ""
+    return f"{sign}{rate}%"
+
 # =========================================================
 # Analysis Functions
 # =========================================================
@@ -1065,10 +1079,10 @@ with tab_importance:
 
 with tab_trend:
     analysis_header(
-        "직전 구간 대비 어떤 이슈가 급부상했는가?",
+        "직전 기간 대비 어떤 이슈가 급부상하거나 감소했는가?",
         "Time Series Analysis + Period-over-Period Change Analysis",
-        "현재 구간과 직전 구간의 키워드 빈도를 비교해 단기적으로 증가한 이슈를 탐지합니다.",
-        "증가 키워드, 감소 키워드, 새롭게 등장한 키워드, 기사량 집중 구간"
+        "현재 기간과 직전 기간의 키워드 빈도를 비교하여 증가한 이슈, 새롭게 등장한 이슈, 감소한 이슈를 함께 분석합니다.",
+        "증가 키워드, 감소 키워드, 신규 등장 키워드, 변화량 및 변화율"
     )
 
     period_count_df = period_counts(summary_df, PERIOD_COL, period_label_map)
@@ -1079,32 +1093,124 @@ with tab_trend:
     decrease_df = keyword_change_df[keyword_change_df["change"] < 0].copy().sort_values("change")
     new_keyword_df = keyword_change_df[(keyword_change_df["previous_count"] == 0) & (keyword_change_df["current_count"] > 0)].copy()
 
+    if not keyword_change_df.empty:
+        keyword_change_df["change_rate_text"] = keyword_change_df.apply(
+            lambda r: format_change_rate(r["previous_count"], r["current_count"]),
+            axis=1
+        )
+    if not increase_df.empty:
+        increase_df["change_rate_text"] = increase_df.apply(
+            lambda r: format_change_rate(r["previous_count"], r["current_count"]),
+            axis=1
+        )
+    if not decrease_df.empty:
+        decrease_df["change_rate_text"] = decrease_df.apply(
+            lambda r: format_change_rate(r["previous_count"], r["current_count"]),
+            axis=1
+        )
+    if not new_keyword_df.empty:
+        new_keyword_df["change_rate_text"] = "신규 등장"
+
+    top_increase = increase_df.iloc[0] if not increase_df.empty else None
+    top_decrease = decrease_df.iloc[0] if not decrease_df.empty else None
+    top_new_keywords = new_keyword_df["keyword"].head(3).tolist() if not new_keyword_df.empty else []
+
+    top_increase_keyword = top_increase["keyword"] if top_increase is not None else "-"
+    top_increase_prev = int(top_increase["previous_count"]) if top_increase is not None else 0
+    top_increase_curr = int(top_increase["current_count"]) if top_increase is not None else 0
+    top_increase_diff = int(top_increase["change"]) if top_increase is not None else 0
+    top_increase_rate = format_change_rate(top_increase_prev, top_increase_curr) if top_increase is not None else "-"
+
+    top_decrease_keyword = top_decrease["keyword"] if top_decrease is not None else "-"
+    top_decrease_prev = int(top_decrease["previous_count"]) if top_decrease is not None else 0
+    top_decrease_curr = int(top_decrease["current_count"]) if top_decrease is not None else 0
+    top_decrease_diff = int(top_decrease["change"]) if top_decrease is not None else 0
+    top_decrease_rate = format_change_rate(top_decrease_prev, top_decrease_curr) if top_decrease is not None else "-"
+
     c1, c2, c3, c4 = st.columns(4)
     with c1:
-        card("현재 구간", current_period_label, period_option)
+        card("현재 기간", current_period_label, period_option)
     with c2:
-        card("기사량 최다 구간", peak_period, f"{peak_count:,}건")
+        card("최대 증가 키워드", top_increase_keyword, f"{top_increase_prev:,}건 → {top_increase_curr:,}건 / {top_increase_diff:+,}건")
     with c3:
-        card("최대 증가 키워드", top_change_keyword, f"{top_change_value:+,}건")
+        card("최대 감소 키워드", top_decrease_keyword, f"{top_decrease_prev:,}건 → {top_decrease_curr:,}건 / {top_decrease_diff:+,}건", "#ef4444")
     with c4:
-        card("신규 등장 키워드", f"{len(new_keyword_df):,}개", "직전 구간 0건 → 현재 구간 등장")
+        card("신규 등장 키워드", f"{len(new_keyword_df):,}개", ", ".join(top_new_keywords) if top_new_keywords else "신규 등장 없음")
 
     section("증가/감소 키워드")
     col1, col2 = st.columns(2)
     with col1:
         progress_list(increase_df.head(10), "keyword", "change", "증가 키워드 TOP 10", suffix="건")
+        if not increase_df.empty:
+            st.dataframe(
+                increase_df[["keyword", "previous_count", "current_count", "change", "change_rate_text"]].head(10),
+                use_container_width=True
+            )
+        else:
+            st.warning("증가한 키워드가 없습니다.")
+
     with col2:
-        progress_list(decrease_df.head(10), "keyword", "change", "감소 키워드 TOP 10", suffix="건")
+        decrease_display = decrease_df.copy()
+        if not decrease_display.empty:
+            decrease_display["decrease_abs"] = decrease_display["change"].abs()
+            progress_list(decrease_display.head(10), "keyword", "decrease_abs", "감소 키워드 TOP 10", suffix="건")
+            st.dataframe(
+                decrease_display[["keyword", "previous_count", "current_count", "change", "change_rate_text"]].head(10),
+                use_container_width=True
+            )
+        else:
+            st.warning("감소한 키워드가 없습니다.")
 
-    section("변화량 상세")
-    st.dataframe(keyword_change_df, use_container_width=True)
+    section("신규 등장 키워드")
+    if new_keyword_df.empty:
+        st.info("직전 기간에는 없었고 현재 기간에 새롭게 등장한 키워드는 없습니다.")
+    else:
+        st.dataframe(
+            new_keyword_df[["keyword", "previous_count", "current_count", "change", "change_rate_text"]].head(20),
+            use_container_width=True
+        )
 
-    insight_box("분석 해석", [
-        f"현재 분석 단위는 '{period_option}'이며 현재 구간은 '{current_period_label}'입니다.",
-        f"직전 기간 대비 가장 크게 증가한 키워드는 '{top_change_keyword}'입니다.",
-        f"새롭게 등장한 키워드는 {len(new_keyword_df):,}개입니다.",
-        "증가 키워드는 단기적으로 관심이 상승한 이슈이며, 감소 키워드는 이전 구간 대비 관심이 줄어든 이슈로 해석할 수 있습니다."
-    ])
+    section("전체 변화량 상세")
+    if keyword_change_df.empty:
+        st.warning("변화량을 계산할 키워드 데이터가 없습니다.")
+    else:
+        st.dataframe(
+            keyword_change_df[["keyword", "previous_count", "current_count", "change", "change_rate_text"]].sort_values("change", ascending=False),
+            use_container_width=True
+        )
+
+    insight_items = [
+        f"현재 분석 단위는 '{period_option}'이며 현재 기간은 '{current_period_label}'입니다."
+    ]
+
+    if top_increase is not None:
+        insight_items.append(
+            f"'{top_increase_keyword}' 키워드는 직전 기간 대비 가장 큰 증가를 보였습니다. "
+            f"({top_increase_prev:,}건 → {top_increase_curr:,}건, {top_increase_diff:+,}건 / {top_increase_rate})"
+        )
+    else:
+        insight_items.append("직전 기간 대비 증가한 키워드는 확인되지 않았습니다.")
+
+    if top_new_keywords:
+        insight_items.append(
+            f"새롭게 등장한 주요 키워드는 {', '.join(top_new_keywords)}입니다."
+        )
+    else:
+        insight_items.append("새롭게 등장한 키워드는 확인되지 않았습니다.")
+
+    if top_decrease is not None:
+        insight_items.append(
+            f"'{top_decrease_keyword}' 키워드는 가장 큰 감소를 보였습니다. "
+            f"({top_decrease_prev:,}건 → {top_decrease_curr:,}건, {top_decrease_diff:+,}건 / {top_decrease_rate})"
+        )
+    else:
+        insight_items.append("직전 기간 대비 감소한 키워드는 확인되지 않았습니다.")
+
+    insight_items.append(
+        "증가 키워드는 단기적으로 관심이 상승한 이슈이며, 감소 키워드는 직전 기간 대비 관심이 줄어든 이슈로 해석할 수 있습니다."
+    )
+
+    insight_box("분석 해석", insight_items)
 
 # =========================================================
 # 4. Risk
