@@ -357,11 +357,3 @@ KoNLPy, Mecab 등을 활용하여 명사 중심의 키워드 추출 정확도를
 ### Visualization
 
 * Streamlit
-
----
-
-## Author
-
-Data Mining Project
-
-2026
