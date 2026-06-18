@@ -1,473 +1,194 @@
-# IT News Dashboard
+# IT News Analysis Dashboard
 
-## 1. 프로젝트 개요
+## Project Overview
 
-본 프로젝트는 네이버 뉴스 API, Google News RSS, 주요 IT 전문 매체 RSS를 통해 수집한 IT 뉴스 데이터를 기반으로 뉴스 트렌드를 분석하고 시각화하는 데이터 분석 대시보드입니다.
+본 프로젝트는 국내 주요 IT 뉴스 데이터를 수집하여 데이터 마이닝 기법을 활용한 분석 대시보드를 구축하는 것을 목표로 한다.
 
-수집된 뉴스 데이터는 AWS Lambda를 통해 주기적으로 수집되며, AWS S3에 CSV 형태로 저장됩니다. 이후 Streamlit Cloud에서 S3 데이터를 불러와 주요 키워드, 주제별 기사 수, 키워드 동시출현, 언론사별 보도 경향, 감성/리스크 분석 등을 시각화합니다.
-
-본 프로젝트의 목적은 단순히 뉴스 기사를 수집하는 데 그치지 않고, 뉴스 텍스트마이닝 기법을 활용하여 IT 산업 내 주요 이슈와 기술 트렌드의 흐름을 파악하는 것입니다.
+뉴스 데이터를 자동 수집 및 전처리한 후, Streamlit 기반 대시보드를 통해 주요 IT 기술 이슈, 기술 간 연관성, 급부상 이슈 등을 시각화하였다.
 
 ---
 
-## 2. 프로젝트 목적
+## Data Collection
 
-IT 뉴스는 인공지능, 반도체, 클라우드, 보안, 플랫폼, 모빌리티 등 다양한 기술 이슈를 반영합니다. 하지만 개별 기사를 단순히 읽는 것만으로는 전체적인 산업 흐름을 파악하기 어렵습니다.
+### Collection Sources
 
-따라서 본 프로젝트는 다음과 같은 목적을 가집니다.
+총 16개의 IT 뉴스 채널을 대상으로 데이터를 수집하였다.
 
-* IT 뉴스 데이터를 자동으로 수집하고 저장
-* 날짜별 주요 키워드 변화 분석
-* 최신일 기준 주요 IT 키워드 트렌드 도출
-* 키워드 동시출현 분석을 통한 메가 트렌드 파악
-* 주제별 기사 수 및 시계열 변화 분석
-* 언론사별 보도 주제 비중 비교
-* 주제별 긍정/부정 감성 분석
-* 보안, 개인정보, 해킹 등 리스크성 이슈 탐지
-
----
-
-## 3. 전체 시스템 구조
-
-뉴스 데이터 소스
-
-* 네이버 뉴스 API
-* Google News RSS
-* 주요 IT 전문 매체 RSS
-* Google News site 검색
-
-↓
-
-AWS Lambda
-
-* 뉴스 데이터 수집
-* HTML 태그 제거
-* 날짜 정규화
-* 언론사 도메인 추출
-* 중복 제거
-
-↓
-
-AWS S3
-
-* CSV 파일 저장
-* 예시:
-
-  * it_news/IT/processed/news_final_20260518.csv
-
-↓
-
-Streamlit Cloud
-
-* S3 CSV 데이터 로드
-* 데이터 병합
-* 중복 제거
-* 키워드 분석
-* 네트워크 분석
-* 감성/리스크 분석
-* 대시보드 시각화
-
----
-
-## 4. 사용 기술
-
-* Python
-* Pandas
-* Streamlit
-* AWS Lambda
-* AWS S3
-* Amazon EventBridge
-* GitHub
-* Streamlit Community Cloud
 * Naver News API
 * Google News RSS
+* DataNet
+* ETNews
+* ZDNet Korea
+* Digital Daily
+* ITWorld Korea
+* IT News
+* Daum IT
+* Digital Today
+* AI Times
+* BoanNews
+* CIO Korea
+* TechWorld
+* 기타 IT 전문 매체
+
+### Collection Period
+
+* 2026-05-14 ~ Present
+
+### Collection Cycle
+
+* Amazon EventBridge
+* Every 1 Hour
 
 ---
 
-## 5. 데이터 수집 방식
-
-### 5.1 네이버 뉴스 API
-
-네이버 뉴스 API를 활용하여 IT 관련 뉴스 데이터를 수집합니다.
-
-기본 검색어:
-
-* IT
-
-수집 항목:
-
-* source
-* media_domain
-* title
-* description
-* originallink
-* link
-* pubDate
-* pubDate_dt
-* loaded_file
-
----
-
-### 5.2 Google News RSS
-
-Google News RSS를 통해 IT 키워드 기반 뉴스와 특정 언론사 site 검색 결과를 수집합니다.
-
-예시:
-
-* site:zdnet.co.kr IT OR 인공지능 OR 클라우드 OR 반도체 OR 보안
-* site:ddaily.co.kr IT OR 인공지능 OR 클라우드 OR 반도체 OR 보안
-* site:itworld.co.kr IT OR 인공지능 OR 클라우드 OR 보안
-
----
-
-### 5.3 RSS 기반 수집
-
-일부 IT 전문 매체는 RSS를 통해 직접 수집합니다.
-
-예시:
-
-* 데이터넷
-* 전자신문
-* ZDNet
-* ITWorld
-* 디지털데일리
-* IT NEWS
-
-RSS가 불안정한 경우 Google News site 검색 방식으로 우회 수집합니다.
-
----
-
-## 6. S3 저장 구조
-
-수집 및 전처리된 뉴스 데이터는 AWS S3에 저장됩니다.
-
-예시:
-
-* s3://news-get-s3/it_news/IT/processed/news_final_20260514.csv
-* s3://news-get-s3/it_news/IT/processed/news_final_20260515.csv
-* s3://news-get-s3/it_news/IT/processed/news_final_20260518.csv
-
-Streamlit 대시보드는 2026년 5월 14일 이후의 CSV 파일을 모두 불러와 하나의 데이터프레임으로 병합합니다.
-
----
-
-## 7. 데이터 전처리
-
-### 7.1 날짜 정규화
-
-CSV 내 날짜 컬럼 중 pubDate_dt를 우선 사용합니다.
-
-분석용 컬럼인 analysis_date로 변환합니다.
-
----
-
-### 7.2 중복 제거
-
-다음 컬럼 기준으로 중복 기사를 제거합니다.
-
-* originallink
-* link
-* title
-
-동일 기사가 여러 수집 경로에서 들어오는 경우를 방지하기 위함입니다.
-
----
-
-### 7.3 텍스트 분석 대상
-
-다음 컬럼을 기반으로 분석합니다.
-
-* title
-* description
-
-기사 제목과 요약문을 결합하여 키워드 분석, 주제 분류, 감성 분석 등을 수행합니다.
-
----
-
-## 8. 대시보드 주요 기능
-
-### 8.1 오늘의 주요 IT 키워드 트렌드
-
-최신 날짜 기준 주요 IT 키워드 TOP 10을 시각화합니다.
-
-예시 키워드:
-
-* AI
-* 인공지능
-* 생성형AI
-* 반도체
-* 클라우드
-* 보안
-* 데이터
-* 전기차
-* 엔비디아
-* HBM
-
----
-
-### 8.2 일별 주요 IT 키워드
-
-날짜별 주요 키워드 TOP 5를 계산하여 보여줍니다.
-
-이를 통해 특정 키워드가 언제 급증했는지 확인할 수 있습니다.
-
-예시 분석 질문:
-
-* AI 키워드는 어느 날짜에 가장 많이 등장했는가?
-* 반도체 관련 보도는 특정 날짜에 집중되었는가?
-* 보안 이슈는 특정 사건 이후 증가했는가?
-
----
-
-### 8.3 키워드 클릭형 기사 탐색
-
-상단 키워드 버튼 클릭 시 관련 기사 목록을 출력합니다.
-
-예시:
-
-* AI 클릭 → AI 관련 기사 출력
-* 반도체 클릭 → 반도체 관련 기사 출력
-* 보안 클릭 → 보안 관련 기사 출력
-
----
-
-### 8.4 최신일 주요 이슈 자동 요약
-
-미리 정의한 IT 주제군을 기반으로 최신일 주요 이슈를 요약합니다.
-
-주제군 예시:
-
-* AI/인공지능
-* 반도체
-* 클라우드/데이터센터
-* 보안/개인정보
-* 모빌리티/로봇
-* 플랫폼/빅테크
-
----
-
-### 8.5 키워드 동시출현 네트워크 분석
-
-같은 기사 안에 함께 등장한 키워드 조합을 계산합니다.
-
-예시:
-
-* AI - 반도체
-* AI - 엔비디아
-* AI - 클라우드
-* 보안 - 개인정보
-* 클라우드 - 데이터센터
-
-이 분석을 통해 기술 이슈 간 연결 구조를 파악할 수 있습니다.
-
----
-
-### 8.6 주제별 기사 수 분석
-
-주제군별 기사 수를 집계하여 어떤 기술 분야가 많이 다뤄졌는지 확인합니다.
-
----
-
-### 8.7 주제별 감성 지수 교차 분석
-
-각 주제별로 긍정/성장, 중립, 부정/리스크 비율을 비교합니다.
-
-긍정 키워드 예시:
-
-* 성장
-* 확대
-* 출시
-* 투자
-* 협력
-* 혁신
-
-부정 키워드 예시:
-
-* 해킹
-* 침해
-* 유출
-* 장애
-* 위험
-* 공격
-
-예시 해석:
-
-AI·클라우드 등 신기술 주제는 성장·투자 중심의 긍정 보도가 많고, 보안·개인정보 주제는 리스크 관점의 보도가 상대적으로 강하게 나타난다.
-
----
-
-### 8.8 주제별 시계열 트렌드 분석
-
-날짜별 각 주제의 기사 수 변화를 분석합니다.
-
-예시 분석 질문:
-
-* 특정 날짜에 AI 기사가 급증했는가?
-* 보안 이슈는 특정 사고 이후 증가했는가?
-* 반도체 관련 뉴스는 특정 기업 발표 이후 증가했는가?
-
----
-
-### 8.9 언론사별 보도 주제 비중
-
-각 언론사의 전체 기사 중 주제별 기사 비중을 계산합니다.
-
-예시:
-
-* ZDNet → AI/클라우드 비중 높음
-* 보안뉴스 → 보안/개인정보 비중 높음
-* 전자신문 → 반도체 비중 높음
-
----
-
-### 8.10 감성/리스크 기사 분석
-
-전체 기사에 대해 긍정/성장, 중립, 부정/리스크로 분류합니다.
-
-부정/리스크 기사만 따로 확인 가능하여 보안 사고, 개인정보 유출, 장애 이슈 등을 탐색할 수 있습니다.
-
----
-
-### 8.11 전체 기사 검색
-
-검색어를 입력하면 관련 기사만 필터링하여 확인할 수 있습니다.
-
-예시:
-
-* AI
-* 반도체
-* 해킹
-* 클라우드
-* 삼성전자
-
----
-
-## 9. 분석 방법론
-
-본 프로젝트는 뉴스 텍스트마이닝 연구에서 자주 활용되는 방법을 참고했습니다.
-
-### 9.1 키워드 빈도 분석
-
-기사 제목과 설명에서 주요 키워드 등장 빈도를 계산합니다.
-
----
-
-### 9.2 키워드 동시출현 분석
-
-같은 기사 안에 두 개 이상의 키워드가 함께 등장하는 경우를 계산합니다.
-
-예시:
-
-* AI + 반도체
-* AI + 클라우드
-* 보안 + 개인정보
-
----
-
-### 9.3 주제 기반 분류
-
-IT 뉴스의 주요 영역을 정의하고 키워드 기반으로 기사를 분류합니다.
-
----
-
-### 9.4 감성/리스크 분석
-
-긍정/성장 키워드와 부정/리스크 키워드를 기준으로 기사 톤을 분류합니다.
-
-본 프로젝트의 감성 분석은 머신러닝 기반이 아닌 규칙 기반 키워드 매칭 방식입니다.
-
----
-
-### 9.5 시계열 분석
-
-날짜별 기사 수 및 주제별 기사 수 변화를 분석합니다.
-
----
-
-## 10. 주요 인사이트 예시
-
-### 10.1 AI는 단독 이슈가 아니라 인프라 이슈와 결합된다
-
-AI 키워드가 반도체, HBM, 클라우드, 데이터센터와 함께 자주 등장한다면 AI 이슈가 연산 인프라 생태계와 결합되고 있다고 해석할 수 있습니다.
-
----
-
-### 10.2 신기술 보도는 긍정적, 보안 이슈는 리스크 중심으로 보도된다
-
-AI·클라우드·반도체는 성장과 혁신 중심으로, 보안·개인정보는 리스크 중심으로 보도되는 경향이 나타날 수 있습니다.
-
----
-
-### 10.3 언론사별 보도 관심사가 다르다
-
-IT 전문 매체는 AI·반도체 중심, 보안 전문 매체는 해킹·개인정보 중심으로 보도하는 경향이 있습니다.
-
----
-
-### 10.4 특정 날짜의 기사 급증은 실제 사건과 연결해 해석해야 한다
-
-시계열 분석에서 특정 날짜의 기사 급증 현상은 기업 발표, 보안 사고, 정책 발표 등 현실 이벤트와 연결해 해석할 수 있습니다.
-
----
-
-## 11. 실행 방법
-
-### 11.1 requirements.txt
-
-필수 패키지:
-
-* streamlit
-* pandas
-* boto3
-
----
-
-### 11.2 로컬 실행
-
-```bash
-streamlit run streamlit_app.py
+## System Architecture
+
+```text
+News Sources
+      ↓
+Amazon EventBridge
+      ↓
+News Collector Lambda
+      ↓
+Amazon S3 (Raw Data)
+      ↓
+News Preprocessor Lambda
+      ↓
+Amazon S3 (Processed Data)
+      ↓
+Streamlit Dashboard
 ```
 
 ---
 
-### 11.3 Streamlit Cloud 배포
+## Data Preprocessing
 
-1. GitHub 저장소 업로드
-2. Streamlit Community Cloud 연결
-3. Main file path:
+수집된 뉴스 데이터에 대해 다음 전처리를 수행하였다.
 
-   * streamlit_app.py
-4. Secrets 등록
+* HTML Tag 제거
+* 특수문자 제거
+* 중복 기사 제거
+* 날짜 형식 정규화
+* 불용어 제거
+* 기사 메타데이터 정리
 
-예시:
-
-AWS_ACCESS_KEY_ID="YOUR_ACCESS_KEY"
-
-AWS_SECRET_ACCESS_KEY="YOUR_SECRET_KEY"
-
-AWS_REGION="ap-northeast-2"
-
-BUCKET_NAME="news-get-s3"
+전처리 결과는 CSV 형식으로 저장하여 분석에 활용하였다.
 
 ---
 
-## 12. AWS IAM 권한
+## Dashboard Features
 
-S3 접근을 위한 최소 권한 정책 예시:
+### 1. IT News Briefing
 
-* s3:GetObject
-* s3:ListBucket
+선택한 기간(일/주/월/년)의 주요 IT 뉴스 이슈를 요약하여 제공한다.
 
-대상:
+분석 내용
 
-* arn:aws:s3:::news-get-s3
-* arn:aws:s3:::news-get-s3/*
+* 기사 수
+* 핵심 키워드
+* 리스크 기사 비율
+* 주요 기술 이슈
 
 ---
 
-## 13. 프로젝트 파일 구조
+### 2. TF-IDF Based Keyword Analysis
 
-* streamlit_app.py
-* requirements.txt
-* README.md
+TF-IDF(Term Frequency - Inverse Document Frequency)를 활용하여 특정 기간을 대표하는 핵심 기술 키워드를 분석한다.
 
+분석 결과 예시
+
+* AI
+* 반도체
+* 클라우드
+* 보안
+* 데이터
+
+---
+
+### 3. Co-occurrence Analysis
+
+뉴스 기사 내에서 함께 등장하는 기술 키워드를 분석하여 기술 간 연관성을 파악한다.
+
+예시
+
+* AI ↔ 디지털
+* AI ↔ 반도체
+* 클라우드 ↔ 보안
+
+---
+
+### 4. Time Series Analysis
+
+직전 기간 대비 증가하거나 감소한 기술 키워드를 분석한다.
+
+분석 내용
+
+* 증가 키워드
+* 감소 키워드
+* 신규 등장 키워드
+* 변화율
+
+이를 통해 최근 급부상한 IT 이슈를 탐지할 수 있다.
+
+---
+
+### 5. Similar Article Analysis
+
+TF-IDF 기반 기사 벡터화를 수행하고 유사 기사 분석을 통해 관련 기사 그룹을 탐색한다.
+
+---
+
+## Applied Data Mining Techniques
+
+본 프로젝트에서 활용한 주요 데이터 마이닝 기법은 다음과 같다.
+
+| Technique              | Description   |
+| ---------------------- | ------------- |
+| TF-IDF                 | 핵심 키워드 추출     |
+| Co-occurrence Analysis | 기술 간 연관성 분석   |
+| Time Series Analysis   | 기간별 키워드 변화 분석 |
+| Cosine Similarity      | 기사 간 유사도 분석   |
+
+---
+
+## Future Improvements
+
+향후 다음과 같은 기능을 추가할 계획이다.
+
+* 데이터 수집 기간 확대
+* 기사 유사도 분석 고도화
+* BERT 기반 감성 분석 적용
+* 한국어 형태소 분석 적용
+* 기술 트렌드 예측 기능 추가
+
+---
+
+## Technology Stack
+
+### Cloud
+
+* AWS Lambda
+* Amazon EventBridge
+* Amazon S3
+
+### Backend
+
+* Python
+
+### Data Processing
+
+* Pandas
+* NumPy
+* Scikit-Learn
+
+### Visualization
+
+* Streamlit
+
+---
+
+## Author
+
+Data Mining Project
+
+2026
